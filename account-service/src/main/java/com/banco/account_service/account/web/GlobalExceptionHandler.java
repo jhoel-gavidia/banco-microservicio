@@ -5,9 +5,11 @@ import com.banco.account_service.account.exception.AccountNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.net.URI;
 import java.util.LinkedHashMap;
@@ -51,6 +53,31 @@ public class GlobalExceptionHandler {
                 errors.putIfAbsent(error.getField(), error.getDefaultMessage())
         );
         problem.setProperty("errors", errors);
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ProblemDetail> handleUnreadableBody(HttpMessageNotReadableException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, "Malformed or unreadable request body"
+        );
+        problem.setType(URI.create("https://banco.local/problems/malformed-body"));
+        problem.setTitle("Malformed request body");
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ProblemDetail> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        String detail = String.format(
+                "Invalid value '%s' for parameter '%s'", ex.getValue(), ex.getName()
+        );
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, detail
+        );
+        problem.setType(URI.create("https://banco.local/problems/type-mismatch"));
+        problem.setTitle("Invalid parameter");
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
     }

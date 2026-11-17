@@ -40,6 +40,9 @@ public class Account {
     @Column(name = "version", nullable = false)
     private Long version;
 
+    @org.hibernate.annotations.Generated(
+            event = org.hibernate.generator.EventType.INSERT
+    )
     @Column(
             name = "created_at",
             nullable = false,
