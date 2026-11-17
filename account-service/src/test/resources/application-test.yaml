@@ -1,0 +1,23 @@
+# Perfil 'test': la URL/user/password los inyecta @DynamicPropertySource
+# desde el PostgreSQLContainer (ver base de integracion).
+# No se ponen valores por defecto a proposito: si faltan, el context falla
+# en vez de conectarse silenciosamente a una BD local.
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway crea el schema; Hibernate solo verifica que la entidad coincida.
+      ddl-auto: validate
+
+  flyway:
+    enabled: true
+
+# Nota: en Spring Boot 4 ya no existe @AutoConfigureTestDatabase ni la
+# propiedad 'spring.test.database.replace' de Boot 3.x. El reemplazo
+# automatico del DataSource por H2 desaparecio, asi que no hay que
+# desactivarlo: el DataSource del contenedor se usa directamente.
