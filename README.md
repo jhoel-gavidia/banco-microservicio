@@ -1,117 +1,57 @@
 # banco-microservicio
 
-Microservicio bancario (account-service) construido paso a paso con Spring Boot 4.1, PostgreSQL 18, Flyway y Testcontainers.
+Account-service: Spring Boot 4.1, PostgreSQL 18, Flyway y Testcontainers. Se construye paso a paso, con un commit por cada cambio.
 
-## Requisitos
-
-- **JDK 21**
-- **Docker** en ejecución (Testcontainers levanta PostgreSQL de forma efímera; no hace falta tener `accounts-db` arrancado para los tests).
-- Maven mediante el wrapper incluido (`./mvnw` / `mvnw.cmd`). No requiere Maven instalado.
-
-## Estructura
-
-```
-compose.yaml                         PostgreSQL local para desarrollo
-account-service/
-  src/main/java/com/banco/account_service/
-    account/                         agregado Account (entidad, DTOs, service, mapper, repositorio)
-      web/                           AccountController + GlobalExceptionHandler (ProblemDetail)
-    support/                         (solo tests) infraestructura compartida
-  src/main/resources/
-    application.yaml                 configuración de producción/local
-    db/migration/                    V1 accounts, V2 ledger_entries, V3 idempotency_keys
-  src/test/resources/
-    application-test.yaml            perfil 'test' (placeholders DB_URL/DB_USER/DB_PASSWORD)
-    clean-db.sql                     TRUNCATE ... RESTART IDENTITY CASCADE
-  src/test/java/.../support/
-    PostgresIntegrationTest.java     base con el PostgreSQLContainer
-```
-
-## Ejecutar la aplicación
+## Arrancarlo
 
 ```powershell
-docker compose up -d                      # levanta accounts-db en localhost:5432
+docker compose up -d
 cd account-service
-.\mvnw.cmd spring-boot:run                # arranca en http://localhost:8081
+.\mvnw.cmd spring-boot:run
 ```
+
+El compose levanta la BD en localhost:5432 y la app queda en http://localhost:8081.
 
 Endpoints:
 
-| Método | Ruta | Descripción |
-|---|---|---|
-| POST | `/api/v1/accounts` | Crear cuenta (201 + header `Location`) |
-| GET | `/api/v1/accounts/{id}` | Consultar cuenta (200 / 404) |
-| GET | `/actuator/health` | Health check |
+- `POST /api/v1/accounts` → 201 con header `Location`. Body: `customerId`, `number`, `currency`.
+- `GET /api/v1/accounts/{id}` → 200 o 404.
+- `GET /actuator/health`.
 
-Los errores siguen **RFC 7807 (ProblemDetail)**: `type`, `title`, `status`, `detail`, `instance`. El campo `type` es un identificador estable del error (no una URL que se visita); el cliente debe programar contra él, no contra el texto de `detail`.
+Los errores vienen en RFC 7807. Fíjate en `type`: es un identificador estable, no una URL que se visita. Es lo que el cliente debería usar para decidir qué hacer; el `detail` es para leer, no para programar contra él.
 
 ## Tests
 
-### ¿Por qué Testcontainers y no H2?
-
-H2 es una BD en memoria distinta de PostgreSQL. En un sistema bancario eso es peligroso:
-
-| Característica | PostgreSQL 18 (real) | H2 |
-|---|---|---|
-| `CHECK (currency ~ '^[A-Z]{3}$')` | regex nativa | sintaxis distinta |
-| `gen_random_uuid()` | nativo | no existe |
-| `TIMESTAMPTZ`, `NUMERIC(19,4)` | exactos | pueden diferir |
-| trigger PL/pgSQL (ledger inmutable) | soportado | no existe |
-| `@Generated` de Hibernate | `SELECT` post-insert real | comportamiento distinto |
-
-Un test verde en H2 puede fallar en producción. Testcontainers usa el **mismo** `postgres:18-alpine` del `compose.yaml`, así que lo que se prueba es lo que se despliega.
-
-### Comandos
-
-Desde `account-service/`:
-
 ```powershell
-# Todos los tests (unitarios + integración) en una sola JVM:
-.\mvnw.cmd test "-Dtest=AccountServiceImplTest,AccountServiceApplicationTests,AccountRepositoryIT,AccountConcurrencyIT"
+# desde account-service/
 
-# Solo unitarios (rápidos, sin Docker):
+# solo unitarios, sin Docker:
 .\mvnw.cmd test "-Dtest=AccountServiceImplTest"
 
-# Solo un test de integración:
+# todo junto (unitarios + integración):
+.\mvnw.cmd test "-Dtest=AccountServiceImplTest,AccountServiceApplicationTests,AccountRepositoryIT,AccountConcurrencyIT"
+
+# uno solo:
 .\mvnw.cmd test "-Dtest=AccountRepositoryIT"
 ```
 
-> **Nota sobre Surefire / Failsafe**: Surefire (que usa `mvn test`) ejecuta por defecto las clases `*Test` / `*Tests`. Las clases `*IT` se invocan explícitamente con `-Dtest=...` como arriba. Cuando se configure CI (Fase 11), se añadirá Failsafe para que `mvn verify` las ejecute automáticamente.
+Con `mvn test` a secas Surefire corre las clases `*Test` y `*Tests`: entran `AccountServiceImplTest` y `AccountServiceApplicationTests`. Ojo que esta última ya usa Testcontainers, así que **necesita Docker aunque no se llame `*IT`**. Los `*IT` no los corre por defecto; hay que pedirlos con `-Dtest=...`. Cuando se monte CI se añadirá Failsafe para que `mvn verify` los corra solos.
 
-### Inventario de tests (11)
+Usamos Testcontainers con `postgres:18-alpine`, la misma imagen del compose. No H2: las regex de los CHECK, `gen_random_uuid()`, el trigger del ledger y el `@Generated` de `createdAt` no se comportan igual. Un test verde en H2 no dice mucho sobre lo que va a pasar en producción.
 
-| Clase | Tipo | Tests | Qué cubre |
-|---|---|---|---|
-| `AccountServiceImplTest` | Unitario (Mockito) | 5 | lógica del service: cuándo llama al mapper, cuándo lanza excepciones |
-| `AccountServiceApplicationTests` | Integración | 1 | el contexto arranca y `ddl-auto: validate` casa entidad ↔ migraciones |
-| `AccountRepositoryIT` | Integración | 4 | `createdAt` generado, `CHECK`, `UNIQUE`, trigger de inmutabilidad del ledger |
-| `AccountConcurrencyIT` | Integración | 1 | 8 hilos, mismo número → exactamente 1 gana, 7 reciben `AccountAlreadyExistsException` |
+`PostgresIntegrationTest` arranca un contenedor en un bloque `static { }` y `@DynamicPropertySource` mete `DB_URL`, `DB_USER` y `DB_PASSWORD` con el puerto aleatorio. `application-test.yaml` los lee sin valor por defecto: si el contenedor no arranca, el test falla en vez de conectarse a una BD local. Flyway migra desde cero en cada corrida y `@Sql("/clean-db.sql")` limpia antes de cada test.
 
-**Pirámide**: la base son tests unitarios rápidos; los de integración se reservan para lo que solo la BD real puede confirmar (constraints, triggers, concurrencia).
+Un detalle que me costó un rato: no poner `@Testcontainers`/`@Container` en la base. Esa extensión para el contenedor al terminar cada clase y lo reinicia en otro puerto, pero Spring deja el contexto en caché con la URL anterior → `Connection refused`. Por eso el `static { POSTGRES.start(); }`: se arranca una vez y lo comparten todas las clases.
 
-### Cómo funciona el PostgreSQL de test
+Cosas de versión que conviene recordar:
 
-1. `PostgresIntegrationTest` arranca **un único** `PostgreSQLContainer` en un bloque `static { }`.
-2. `@DynamicPropertySource` inyecta `DB_URL`, `DB_USER`, `DB_PASSWORD` con el puerto **aleatorio** del contenedor.
-3. `application-test.yaml` (perfil `test`) lee esos placeholders **sin valores por defecto**: si el contenedor no arranca, el context falla en vez de conectarse a una BD local.
-4. Flyway migra V1→V2→V3 desde `<< Empty Schema >>` en cada ejecución.
-5. `@Sql("/clean-db.sql")` con `TRUNCATE ... RESTART IDENTITY CASCADE` limpia antes de cada test.
+- Boot 4 no trae `@AutoConfigureTestDatabase` ni `spring.test.database.replace`.
+- `DynamicPropertyRegistry` solo tiene `add()` (no `addFirst()`).
+- Testcontainers 2.x: `org.testcontainers.postgresql.PostgreSQLContainer`, y la clase no es genérica (sin `<>`).
 
-#### ⚠️ Gotcha: el contenedor compartido entre clases
+## Decisiones
 
-No usar `@Testcontainers` + `@Container` en la base si varias clases la extienden. Esa extensión gestiona el ciclo de vida **por clase**: para el contenedor al terminar la clase A y lo reinicia en la B con otro puerto, mientras Spring reutiliza el `ApplicationContext` cacheado apuntando al puerto viejo → `Connection refused`.
-
-Por eso el contenedor se arranca una vez con `static { POSTGRES.start(); }`. Ryuk lo elimina al terminar la JVM.
-
-### Hallazgos de versión (Boot 4.1 / Testcontainers 2.x)
-
-- En Boot 4 **no existe** `@AutoConfigureTestDatabase` ni `spring.test.database.replace` (era de Boot 3). No hay reemplazo automático por H2 que desactivar.
-- En Spring Framework 7.0 `DynamicPropertyRegistry` solo expone `add(...)` (no `addFirst()`).
-- Testcontainers 2.x: artefacto `testcontainers-postgresql`, paquete `org.testcontainers.postgresql.PostgreSQLContainer`, y la clase **no es genérica** (se usa `PostgreSQLContainer`, sin `<>`).
-
-## Decisiones de diseño destacadas
-
-- **Dinero**: `NUMERIC(19,4)` en BD y `BigDecimal` en Java. Nunca `double`.
-- **Última línea de defensa**: `CHECK`, `UNIQUE` y FK en la BD, además de la validación Bean Validation en el DTO.
-- **`saveAndFlush` dentro del `try`**: fuerza el `INSERT` dentro de la transacción para poder traducir la violación `UNIQUE` (carrera concurrente) a `AccountAlreadyExistsException`. Con un `save` simple, el error aparecería en el commit, fuera del `try`.
-- **Mapper con MapStruct**: `AccountMapper` convierte la entidad JPA en `AccountResponse`. Los processors se declaran Lombok → MapStruct en el `pom.xml` para que MapStruct vea los getters generados.
+- Dinero siempre `BigDecimal` / `NUMERIC(19,4)`. Nunca `double`.
+- Los CHECK, UNIQUE y FK están en la BD, además de la validación del DTO. No nos fiamos solo de Bean Validation.
+- `saveAndFlush` dentro del `try`: si no, el error de UNIQUE por concurrencia sale en el commit, fuera del catch, y no se puede traducir a `AccountAlreadyExistsException`.
+- `AccountMapper` (MapStruct) solo convierte entidad → DTO. En el pom los annotation processors van Lombok antes que MapStruct, para que MapStruct vea los getters generados.
