@@ -4,6 +4,7 @@ import com.banco.account_service.account.Account;
 import com.banco.account_service.account.dto.AccountResponse;
 import com.banco.account_service.account.exception.AccountAlreadyExistsException;
 import com.banco.account_service.account.exception.AccountNotFoundException;
+import com.banco.account_service.account.mapper.AccountMapper;
 import com.banco.account_service.account.repository.AccountRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,12 +30,25 @@ class AccountServiceImplTest {
     @Mock
     private AccountRepository accountRepository;
 
+    @Mock
+    private AccountMapper accountMapper;
+
     @InjectMocks
     private AccountServiceImpl accountService;
 
     private static final UUID CUSTOMER_ID = UUID.randomUUID();
     private static final String NUMBER = "ES9121000418450200051332";
     private static final String CURRENCY = "EUR";
+
+    private void stubMapper() {
+        when(accountMapper.toResponse(any(Account.class))).thenAnswer(invocation -> {
+            Account account = invocation.getArgument(0);
+            return new AccountResponse(
+                    account.getId(), account.getNumber(), account.getCurrency(),
+                    account.getBalance(), account.getStatus(), account.getCreatedAt()
+            );
+        });
+    }
 
     @Test
     void openAccount_savesAndReturnsResponse() {
@@ -44,6 +58,7 @@ class AccountServiceImplTest {
             // Simula lo que haría JPA al persistir (id, version y created_at los genera la BD)
             return account;
         });
+        stubMapper();
 
         AccountResponse response = accountService.openAccount(CUSTOMER_ID, NUMBER, CURRENCY);
 
@@ -79,6 +94,7 @@ class AccountServiceImplTest {
     void getAccountById_whenExists_returnsResponse() {
         Account account = Account.open(CUSTOMER_ID, NUMBER, CURRENCY);
         when(accountRepository.findById(any(UUID.class))).thenReturn(Optional.of(account));
+        stubMapper();
 
         AccountResponse response = accountService.getAccountById(UUID.randomUUID());
 
