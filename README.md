@@ -61,6 +61,7 @@ Cosas de versión que conviene recordar:
 ## Decisiones
 
 - Dinero siempre `BigDecimal` / `NUMERIC(19,4)`. Nunca `double`.
+- `CurrencyCode` es un value object (record) validado contra el registro ISO 4217 del JDK, con `AttributeConverter` a `VARCHAR(3)`: no hay enum que mantener ni hizo falta una migración nueva. Normaliza a mayúsculas y expone `fractionDigits()`. El CHECK de la BD se queda como defensa en profundidad para inserts directos por SQL.
 - Los CHECK, UNIQUE y FK están en la BD, además de la validación del DTO. No nos fiamos solo de Bean Validation.
 - `saveAndFlush` dentro del `try`: si no, el error de UNIQUE por concurrencia sale en el commit, fuera del catch, y no se puede traducir a `AccountAlreadyExistsException`.
 - `AccountMapper` (MapStruct) solo convierte entidad → DTO. En el pom los annotation processors van Lombok antes que MapStruct, para que MapStruct vea los getters generados.

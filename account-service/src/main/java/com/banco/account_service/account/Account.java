@@ -27,8 +27,10 @@ public class Account {
     @Column(name = "number", nullable = false, length = 34)
     private String number;
 
+    @Convert(converter = CurrencyCodeConverter.class)
     @Column(name = "currency", nullable = false, length = 3)
-    private String currency;
+    @Getter(AccessLevel.NONE)
+    private CurrencyCode currency;
 
     @Column(name = "balance", nullable = false, precision = 19, scale = 4)
     private BigDecimal balance;
@@ -63,19 +65,25 @@ public class Account {
             throw new IllegalArgumentException("Invalid account number");
         }
 
-        if (currency == null || !currency.matches("[A-Z]{3}")) {
-            throw new IllegalArgumentException("Invalid currency");
-        }
+        CurrencyCode currencyCode = CurrencyCode.of(currency);
 
         Account account = new Account();
 
         account.customerId = customerId;
         account.number = number;
-        account.currency = currency;
+        account.currency = currencyCode;
         account.balance = BigDecimal.ZERO;
         account.status = Status.ACTIVE;
 
         return account;
+    }
+
+    public CurrencyCode getCurrencyCode() {
+        return currency;
+    }
+
+    public String getCurrency() {
+        return currency == null ? null : currency.code();
     }
 
     public BigDecimal credit(BigDecimal amount) {
