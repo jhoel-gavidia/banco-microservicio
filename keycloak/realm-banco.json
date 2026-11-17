@@ -1,0 +1,115 @@
+{
+  "realm": "banco",
+  "enabled": true,
+  "displayName": "Banco",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "accessTokenLifespan": 3600,
+  "roles": {
+    "realm": [
+      {
+        "name": "account_read",
+        "description": "Consultar cuentas y movimientos propios",
+        "composite": false,
+        "clientRole": false,
+        "attributes": {}
+      },
+      {
+        "name": "account_write",
+        "description": "Depositar y retirar en cuentas propias",
+        "composite": false,
+        "clientRole": false,
+        "attributes": {}
+      },
+      {
+        "name": "admin",
+        "description": "Acceso total, solo para pruebas locales",
+        "composite": false,
+        "clientRole": false,
+        "attributes": {}
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "account-service",
+      "name": "account-service",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "account-service-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["*"],
+      "webOrigins": ["*"],
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "customerId",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "customerId",
+            "claim.name": "customerId",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true",
+            "multivalued": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@banco.local",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Lopez",
+      "credentials": [
+        { "type": "password", "value": "alice", "temporary": false }
+      ],
+      "attributes": {
+        "customerId": ["11111111-1111-4111-8111-111111111111"]
+      },
+      "realmRoles": ["account_read", "account_write"]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@banco.local",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Perez",
+      "credentials": [
+        { "type": "password", "value": "bob", "temporary": false }
+      ],
+      "attributes": {
+        "customerId": ["22222222-2222-4222-8222-222222222222"]
+      },
+      "realmRoles": ["account_read", "account_write"]
+    },
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@banco.local",
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "Banco",
+      "credentials": [
+        { "type": "password", "value": "admin", "temporary": false }
+      ],
+      "attributes": {
+        "customerId": ["33333333-3333-4333-8333-333333333333"]
+      },
+      "realmRoles": ["admin"]
+    }
+  ]
+}
