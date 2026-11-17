@@ -52,8 +52,13 @@ public class IdempotencyKey {
         this.status = IdempotencyStatus.IN_PROGRESS;
     }
 
-    public static IdempotencyKey start(UUID customerId, String key, String requestHash) {
-        return new IdempotencyKey(new IdempotencyKeyId(customerId, key), requestHash);
+    public static IdempotencyKey start(
+            UUID customerId,
+            UUID accountId,
+            String key,
+            String requestHash
+    ) {
+        return new IdempotencyKey(new IdempotencyKeyId(customerId, accountId, key), requestHash);
     }
 
     public boolean matches(String requestHash) {

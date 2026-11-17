@@ -16,17 +16,24 @@ public class IdempotencyServiceImpl implements IdempotencyService {
     private final IdempotencyKeyRepository repository;
 
     @Override
-    public Optional<StoredResponse> begin(UUID customerId, String key, String requestHash) {
+    public Optional<StoredResponse> begin(
+            UUID customerId,
+            UUID accountId,
+            String key,
+            String requestHash
+    ) {
         if (key.length() > 100) {
             throw new IllegalArgumentException("Idempotency-Key must be at most 100 characters");
         }
 
-        IdempotencyKeyId id = new IdempotencyKeyId(customerId, key);
+        IdempotencyKeyId id = new IdempotencyKeyId(customerId, accountId, key);
         Optional<IdempotencyKey> found = repository.findById(id);
 
         if (found.isEmpty()) {
             try {
-                repository.saveAndFlush(IdempotencyKey.start(customerId, key, requestHash));
+                repository.saveAndFlush(
+                        IdempotencyKey.start(customerId, accountId, key, requestHash)
+                );
                 return Optional.empty();
             } catch (DataIntegrityViolationException ex) {
                 found = repository.findById(id);
@@ -49,8 +56,10 @@ public class IdempotencyServiceImpl implements IdempotencyService {
     }
 
     @Override
-    public void complete(UUID customerId, String key, int status, String body) {
-        IdempotencyKey stored = repository.findById(new IdempotencyKeyId(customerId, key))
+    public void complete(UUID customerId, UUID accountId, String key, int status, String body) {
+        IdempotencyKey stored = repository.findById(
+                new IdempotencyKeyId(customerId, accountId, key)
+        )
                 .orElseThrow(() -> new IllegalStateException("Idempotency key not found: " + key));
         stored.complete(status, body);
     }

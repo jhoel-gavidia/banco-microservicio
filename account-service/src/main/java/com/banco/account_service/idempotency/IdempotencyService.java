@@ -8,7 +8,12 @@ public interface IdempotencyService {
     record StoredResponse(int status, String body) {
     }
 
-    Optional<StoredResponse> begin(UUID customerId, String key, String requestHash);
+    Optional<StoredResponse> begin(
+            UUID customerId,
+            UUID accountId,
+            String key,
+            String requestHash
+    );
 
-    void complete(UUID customerId, String key, int status, String body);
+    void complete(UUID customerId, UUID accountId, String key, int status, String body);
 }

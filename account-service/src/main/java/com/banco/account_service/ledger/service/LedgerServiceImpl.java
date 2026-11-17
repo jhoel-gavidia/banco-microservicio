@@ -85,7 +85,8 @@ public class LedgerServiceImpl implements LedgerService {
 
         if (idempotent) {
             Optional<StoredResponse> replay = idempotencyService.begin(
-                    account.getCustomerId(), idempotencyKey, hash(type, amount, reference)
+                    account.getCustomerId(), accountId, idempotencyKey,
+                hash(accountId, type, amount, reference)
             );
             if (replay.isPresent()) {
                 return deserialize(replay.get().body());
@@ -113,7 +114,8 @@ public class LedgerServiceImpl implements LedgerService {
 
         if (idempotent) {
             idempotencyService.complete(
-                    account.getCustomerId(), idempotencyKey, 201, serialize(response)
+                    account.getCustomerId(), accountId, idempotencyKey,
+                    201, serialize(response)
             );
         }
 
@@ -135,9 +137,14 @@ public class LedgerServiceImpl implements LedgerService {
                 .toList();
     }
 
-    private static String hash(LedgerEntryType type, BigDecimal amount, String reference) {
-        String payload = type.name() + "|" + amount.stripTrailingZeros().toPlainString()
-                + "|" + reference;
+    private static String hash(
+            UUID accountId,
+            LedgerEntryType type,
+            BigDecimal amount,
+            String reference
+    ) {
+        String payload = accountId + "|" + type.name() + "|"
+                + amount.stripTrailingZeros().toPlainString() + "|" + reference;
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(payload.getBytes(StandardCharsets.UTF_8));
