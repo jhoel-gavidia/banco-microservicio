@@ -6,10 +6,13 @@ import com.banco.account_service.account.exception.InsufficientFundsException;
 import com.banco.account_service.idempotency.exception.IdempotencyKeyInProgressException;
 import com.banco.account_service.idempotency.exception.IdempotencyKeyReusedException;
 import com.banco.account_service.ledger.exception.DuplicateReferenceException;
+import com.banco.account_service.security.SecurityProblems;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -145,5 +148,19 @@ public class GlobalExceptionHandler {
         problem.setTitle("Idempotency-Key in progress");
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ProblemDetail> handleAccessDenied(AccessDeniedException ex) {
+        ProblemDetail problem = SecurityProblems.forbidden(ex.getMessage());
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ProblemDetail> handleAuthentication(AuthenticationException ex) {
+        ProblemDetail problem = SecurityProblems.unauthorized(ex.getMessage());
+
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(problem);
     }
 }
