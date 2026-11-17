@@ -1,6 +1,7 @@
 package com.banco.account_service.ledger.service;
 
 import com.banco.account_service.ledger.dto.LedgerEntryResponse;
+import com.banco.account_service.security.CustomerContext;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -12,15 +13,17 @@ public interface LedgerService {
             UUID accountId,
             BigDecimal amount,
             String reference,
-            String idempotencyKey
+            String idempotencyKey,
+            CustomerContext customer
     );
 
     LedgerEntryResponse withdraw(
             UUID accountId,
             BigDecimal amount,
             String reference,
-            String idempotencyKey
+            String idempotencyKey,
+            CustomerContext customer
     );
 
-    List<LedgerEntryResponse> getMovements(UUID accountId);
+    List<LedgerEntryResponse> getMovements(UUID accountId, CustomerContext customer);
 }

@@ -11,6 +11,7 @@ import com.banco.account_service.ledger.dto.LedgerEntryResponse;
 import com.banco.account_service.ledger.exception.DuplicateReferenceException;
 import com.banco.account_service.ledger.mapper.LedgerEntryMapper;
 import com.banco.account_service.ledger.repository.LedgerEntryRepository;
+import com.banco.account_service.security.CustomerContext;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -44,9 +45,12 @@ public class LedgerServiceImpl implements LedgerService {
             UUID accountId,
             BigDecimal amount,
             String reference,
-            String idempotencyKey
+            String idempotencyKey,
+            CustomerContext customer
     ) {
-        return recordMovement(accountId, amount, reference, LedgerEntryType.CREDIT, idempotencyKey);
+        return recordMovement(
+                accountId, amount, reference, LedgerEntryType.CREDIT, idempotencyKey, customer
+        );
     }
 
     @Override
@@ -55,9 +59,12 @@ public class LedgerServiceImpl implements LedgerService {
             UUID accountId,
             BigDecimal amount,
             String reference,
-            String idempotencyKey
+            String idempotencyKey,
+            CustomerContext customer
     ) {
-        return recordMovement(accountId, amount, reference, LedgerEntryType.DEBIT, idempotencyKey);
+        return recordMovement(
+                accountId, amount, reference, LedgerEntryType.DEBIT, idempotencyKey, customer
+        );
     }
 
     private LedgerEntryResponse recordMovement(
@@ -65,10 +72,14 @@ public class LedgerServiceImpl implements LedgerService {
             BigDecimal amount,
             String reference,
             LedgerEntryType type,
-            String idempotencyKey
+            String idempotencyKey,
+            CustomerContext customer
     ) {
-        Account account = accountRepository.findByIdForUpdate(accountId)
-                .orElseThrow(() -> new AccountNotFoundException(accountId));
+        Account account = customer.admin()
+                ? accountRepository.findByIdForUpdate(accountId)
+                        .orElseThrow(() -> new AccountNotFoundException(accountId))
+                : accountRepository.findByIdForUpdateAndCustomerId(accountId, customer.customerId())
+                        .orElseThrow(() -> new AccountNotFoundException(accountId));
 
         boolean idempotent = idempotencyKey != null && !idempotencyKey.isBlank();
 
@@ -110,8 +121,12 @@ public class LedgerServiceImpl implements LedgerService {
     }
 
     @Override
-    public List<LedgerEntryResponse> getMovements(UUID accountId) {
-        if (!accountRepository.existsById(accountId)) {
+    public List<LedgerEntryResponse> getMovements(UUID accountId, CustomerContext customer) {
+        boolean owned = customer.admin()
+                ? accountRepository.existsById(accountId)
+                : accountRepository.findByIdAndCustomerId(accountId, customer.customerId()).isPresent();
+
+        if (!owned) {
             throw new AccountNotFoundException(accountId);
         }
 

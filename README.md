@@ -14,7 +14,7 @@ El compose levanta la BD en localhost:5432 y la app queda en http://localhost:80
 
 Endpoints:
 
-- `POST /api/v1/accounts` → 201 con header `Location`. Body: `customerId`, `number`, `currency`.
+- `POST /api/v1/accounts` → 201 con header `Location`. Body: `number`, `currency`. El `customerId` se toma del token, no del body.
 - `GET /api/v1/accounts/{id}` → 200 o 404.
 - `POST /api/v1/accounts/{id}/deposits` → 201. Body: `amount`, `reference`.
 - `POST /api/v1/accounts/{id}/withdrawals` → 201. Body: `amount`, `reference`.
@@ -24,6 +24,8 @@ Endpoints:
 `reference` la elige el cliente y es obligatoria. Se guarda en el asiento y `UNIQUE (account_id, reference, type)` evita que el mismo movimiento se registre dos veces; repetirla devuelve 409. Retirar más de lo disponible devuelve 422.
 
 Los POST aceptan además el header opcional `Idempotency-Key`. Repetiendo la misma clave con el mismo body se devuelve la respuesta guardada sin insertar otro asiento; con otro body da 409. Solo se guardan respuestas exitosas: si el movimiento falla, la transacción se revierte y la clave queda libre para reintentar.
+
+Todas las rutas exigen un Bearer token de Keycloak. Los roles del realm son `account_read` (GET) y `account_write` (POST); `admin` ve todas las cuentas. Los datos están además filtrados por propietario: si la cuenta no es tuya responde 404, no 403, para no revelar que existe.
 
 Los errores vienen en RFC 7807. Fíjate en `type`: es un identificador estable, no una URL que se visita. Es lo que el cliente debería usar para decidir qué hacer; el `detail` es para leer, no para programar contra él.
 

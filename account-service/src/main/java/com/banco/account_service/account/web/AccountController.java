@@ -3,6 +3,8 @@ package com.banco.account_service.account.web;
 import com.banco.account_service.account.dto.AccountResponse;
 import com.banco.account_service.account.dto.CreateAccountRequest;
 import com.banco.account_service.account.service.AccountService;
+import com.banco.account_service.security.AuthenticatedCustomer;
+import com.banco.account_service.security.CustomerContext;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -22,13 +24,15 @@ import java.util.UUID;
 public class AccountController {
 
     private final AccountService accountService;
+    private final AuthenticatedCustomer authenticatedCustomer;
 
     @PostMapping
     public ResponseEntity<AccountResponse> openAccount(
             @Valid @RequestBody CreateAccountRequest request
     ) {
+        CustomerContext customer = authenticatedCustomer.current();
         AccountResponse created = accountService.openAccount(
-                request.customerId(),
+                customer.customerId(),
                 request.number(),
                 request.currency()
         );
@@ -42,6 +46,8 @@ public class AccountController {
     public ResponseEntity<AccountResponse> getAccountById(
             @PathVariable UUID accountId
     ) {
-        return ResponseEntity.ok(accountService.getAccountById(accountId));
+        return ResponseEntity.ok(
+                accountService.getAccountById(accountId, authenticatedCustomer.current())
+        );
     }
 }

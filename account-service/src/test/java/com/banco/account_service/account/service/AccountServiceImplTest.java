@@ -6,6 +6,7 @@ import com.banco.account_service.account.exception.AccountAlreadyExistsException
 import com.banco.account_service.account.exception.AccountNotFoundException;
 import com.banco.account_service.account.mapper.AccountMapper;
 import com.banco.account_service.account.repository.AccountRepository;
+import com.banco.account_service.security.CustomerContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -20,6 +21,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -93,10 +95,13 @@ class AccountServiceImplTest {
     @Test
     void getAccountById_whenExists_returnsResponse() {
         Account account = Account.open(CUSTOMER_ID, NUMBER, CURRENCY);
-        when(accountRepository.findById(any(UUID.class))).thenReturn(Optional.of(account));
+        when(accountRepository.findByIdAndCustomerId(any(UUID.class), eq(CUSTOMER_ID)))
+                .thenReturn(Optional.of(account));
         stubMapper();
 
-        AccountResponse response = accountService.getAccountById(UUID.randomUUID());
+        AccountResponse response = accountService.getAccountById(
+                UUID.randomUUID(), new CustomerContext(CUSTOMER_ID, false)
+        );
 
         assertThat(response.number()).isEqualTo(NUMBER);
     }
@@ -104,9 +109,12 @@ class AccountServiceImplTest {
     @Test
     void getAccountById_whenMissing_throwsAccountNotFound() {
         UUID accountId = UUID.randomUUID();
-        when(accountRepository.findById(accountId)).thenReturn(Optional.empty());
+        when(accountRepository.findByIdAndCustomerId(accountId, CUSTOMER_ID))
+                .thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> accountService.getAccountById(accountId))
+        assertThatThrownBy(() -> accountService.getAccountById(
+                accountId, new CustomerContext(CUSTOMER_ID, false)
+        ))
                 .isInstanceOf(AccountNotFoundException.class)
                 .hasMessageContaining(accountId.toString());
     }

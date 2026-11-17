@@ -3,6 +3,7 @@ package com.banco.account_service.ledger.web;
 import com.banco.account_service.ledger.dto.LedgerEntryResponse;
 import com.banco.account_service.ledger.dto.MoneyMovementRequest;
 import com.banco.account_service.ledger.service.LedgerService;
+import com.banco.account_service.security.AuthenticatedCustomer;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -24,6 +25,7 @@ import java.util.UUID;
 public class LedgerController {
 
     private final LedgerService ledgerService;
+    private final AuthenticatedCustomer authenticatedCustomer;
 
     @PostMapping("/deposits")
     public ResponseEntity<LedgerEntryResponse> deposit(
@@ -34,7 +36,8 @@ public class LedgerController {
         return ResponseEntity
                 .status(HttpStatus.CREATED)
                 .body(ledgerService.deposit(
-                        accountId, request.amount(), request.reference(), idempotencyKey
+                        accountId, request.amount(), request.reference(), idempotencyKey,
+                        authenticatedCustomer.current()
                 ));
     }
 
@@ -47,7 +50,8 @@ public class LedgerController {
         return ResponseEntity
                 .status(HttpStatus.CREATED)
                 .body(ledgerService.withdraw(
-                        accountId, request.amount(), request.reference(), idempotencyKey
+                        accountId, request.amount(), request.reference(), idempotencyKey,
+                        authenticatedCustomer.current()
                 ));
     }
 
@@ -55,6 +59,8 @@ public class LedgerController {
     public ResponseEntity<List<LedgerEntryResponse>> getMovements(
             @PathVariable UUID accountId
     ) {
-        return ResponseEntity.ok(ledgerService.getMovements(accountId));
+        return ResponseEntity.ok(
+                ledgerService.getMovements(accountId, authenticatedCustomer.current())
+        );
     }
 }

@@ -1,6 +1,7 @@
 package com.banco.account_service.account.service;
 
 import com.banco.account_service.account.dto.AccountResponse;
+import com.banco.account_service.security.CustomerContext;
 
 import java.util.UUID;
 
@@ -12,6 +13,6 @@ public interface AccountService {
             String currency
     );
 
-    AccountResponse getAccountById(UUID accountId);
+    AccountResponse getAccountById(UUID accountId, CustomerContext customer);
 
 }

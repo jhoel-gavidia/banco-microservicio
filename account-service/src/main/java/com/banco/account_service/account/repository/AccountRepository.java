@@ -14,7 +14,16 @@ public interface AccountRepository extends JpaRepository<Account, UUID> {
 
     boolean existsByNumber(String number);
 
+    Optional<Account> findByIdAndCustomerId(UUID id, UUID customerId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from Account a where a.id = :id")
     Optional<Account> findByIdForUpdate(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select a from Account a where a.id = :id and a.customerId = :customerId")
+    Optional<Account> findByIdForUpdateAndCustomerId(
+            @Param("id") UUID id,
+            @Param("customerId") UUID customerId
+    );
 }
