@@ -9,7 +9,7 @@ import java.util.UUID;
 
 public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> {
 
-    List<LedgerEntry> findByAccountIdOrderByCreatedAtDesc(UUID accountId);
+    List<LedgerEntry> findByAccountIdOrderByEntrySeqDesc(UUID accountId);
 
     boolean existsByAccountIdAndReferenceAndType(
             UUID accountId,

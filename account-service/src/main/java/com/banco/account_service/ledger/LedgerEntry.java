@@ -52,6 +52,17 @@ public class LedgerEntry {
             event = org.hibernate.generator.EventType.INSERT
     )
     @Column(
+            name = "entry_seq",
+            nullable = false,
+            updatable = false,
+            insertable = false
+    )
+    private Long entrySeq;
+
+    @org.hibernate.annotations.Generated(
+            event = org.hibernate.generator.EventType.INSERT
+    )
+    @Column(
             name = "created_at",
             nullable = false,
             updatable = false,

@@ -134,7 +134,7 @@ public class LedgerServiceImpl implements LedgerService {
             throw new AccountNotFoundException(accountId);
         }
 
-        return ledgerEntryRepository.findByAccountIdOrderByCreatedAtDesc(accountId).stream()
+        return ledgerEntryRepository.findByAccountIdOrderByEntrySeqDesc(accountId).stream()
                 .map(ledgerEntryMapper::toResponse)
                 .toList();
     }
