@@ -48,6 +48,8 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/accounts/**")
                         .hasAnyRole("ADMIN", "ACCOUNT_READ")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/accounts/*/deposits")
+                        .hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/accounts", "/api/v1/accounts/**")
                         .hasAnyRole("ADMIN", "ACCOUNT_WRITE")
                         .anyRequest().authenticated()

@@ -2,6 +2,25 @@
 
 Account-service: Spring Boot 4.1, PostgreSQL 18, Flyway y Testcontainers.
 
+## Fases de desarrollo
+
+| # | Fase | Estado |
+| --- | --- | --- |
+| 0 | Esqueleto del proyecto y Maven | Hecha |
+| 1 | PostgreSQL, Docker Compose y Flyway | Hecha |
+| 2 | Feature account: entidad, servicio y API REST | Hecha |
+| 3 | Tests con Testcontainers | Hecha |
+| 4 | Feature ledger: depósitos, retiros e historial | Hecha |
+| 5 | Idempotencia de movimientos | Hecha |
+| 6 | Seguridad con Keycloak | Hecha |
+| 7 | Outbox y Kafka | Pendiente |
+| 8 | Transfer Service con saga y compensaciones | Pendiente |
+| 9 | Resiliencia y observabilidad | Pendiente |
+| 10 | API Gateway | Pendiente |
+| 11 | Dockerfile, GitHub Actions y despliegue | Pendiente |
+
+Antes de seguir con la fase 7 se está cerrando una tanda de correcciones en la rama `fix/account-service-hardening`: idempotencia por cuenta, validación del estado de la cuenta y autorización de depósitos.
+
 ## Arrancarlo
 
 ```powershell
@@ -16,7 +35,7 @@ Endpoints:
 
 - `POST /api/v1/accounts` → 201 con header `Location`. Body: `number`, `currency`. El `customerId` se toma del token, no del body.
 - `GET /api/v1/accounts/{id}` → 200 o 404.
-- `POST /api/v1/accounts/{id}/deposits` → 201. Body: `amount`, `reference`.
+- `POST /api/v1/accounts/{id}/deposits` → 201. Body: `amount`, `reference`. Solo `admin`; más adelante también un servicio interno con su propio scope.
 - `POST /api/v1/accounts/{id}/withdrawals` → 201. Body: `amount`, `reference`.
 - `GET /api/v1/accounts/{id}/movements` → 200 con el historial.
 - `GET /actuator/health`.
@@ -60,7 +79,7 @@ Usuarios del realm:
 | `carol` | `44444444-4444-4444-8444-444444444444` | `account_read` |
 | `admin` | `33333333-3333-4333-8333-333333333333` | `admin` |
 
-`account_read` habilita los GET y `account_write` los POST. `admin` ve todas las cuentas; los demás solo las suyas. La propiedad se comprueba en la capa de datos: los repositorios filtran por `customerId` y una cuenta ajena responde 404, no 403, para no revelar que existe. El `customerId` no se acepta en el body de creación: se toma del token, así nadie puede abrir una cuenta a nombre de otro.
+`account_read` habilita los GET; `account_write` habilita crear cuentas y retirar, pero **no depositar**. Un depósito lo hace `admin` o, en el futuro, un servicio interno con su propio scope: el cliente no puede acreditarse dinero a sí mismo. `admin` ve todas las cuentas; los demás solo las suyas. La propiedad se comprueba en la capa de datos: los repositorios filtran por `customerId` y una cuenta ajena responde 404, no 403, para no revelar que existe. El `customerId` no se acepta en el body de creación: se toma del token, así nadie puede abrir una cuenta a nombre de otro.
 
 Dos detalles que valen la pena saber:
 
