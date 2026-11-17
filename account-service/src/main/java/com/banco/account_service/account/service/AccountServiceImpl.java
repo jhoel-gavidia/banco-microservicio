@@ -4,6 +4,7 @@ import com.banco.account_service.account.Account;
 import com.banco.account_service.account.dto.AccountResponse;
 import com.banco.account_service.account.exception.AccountAlreadyExistsException;
 import com.banco.account_service.account.exception.AccountNotFoundException;
+import com.banco.account_service.account.mapper.AccountMapper;
 import com.banco.account_service.account.repository.AccountRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -18,6 +19,7 @@ import java.util.UUID;
 public class AccountServiceImpl implements AccountService {
 
     private final AccountRepository accountRepository;
+    private final AccountMapper accountMapper;
 
     @Override
     @Transactional
@@ -34,7 +36,7 @@ public class AccountServiceImpl implements AccountService {
 
         try {
             Account savedAccount = accountRepository.saveAndFlush(account);
-            return toResponse(savedAccount);
+            return accountMapper.toResponse(savedAccount);
         } catch (DataIntegrityViolationException ex) {
             throw new AccountAlreadyExistsException(number);
         }
@@ -45,17 +47,6 @@ public class AccountServiceImpl implements AccountService {
         Account account = accountRepository.findById(accountId)
                 .orElseThrow(() -> new AccountNotFoundException(accountId));
 
-        return toResponse(account);
-    }
-
-    private AccountResponse toResponse(Account account) {
-        return new AccountResponse(
-                account.getId(),
-                account.getNumber(),
-                account.getCurrency(),
-                account.getBalance(),
-                account.getStatus(),
-                account.getCreatedAt()
-        );
+        return accountMapper.toResponse(account);
     }
 }
