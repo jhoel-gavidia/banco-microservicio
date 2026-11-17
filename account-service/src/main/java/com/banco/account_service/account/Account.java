@@ -1,5 +1,6 @@
 package com.banco.account_service.account;
 
+import com.banco.account_service.account.exception.InsufficientFundsException;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -75,5 +76,33 @@ public class Account {
         account.status = Status.ACTIVE;
 
         return account;
+    }
+
+    public BigDecimal credit(BigDecimal amount) {
+        validateAmount(amount);
+        balance = balance.add(amount);
+        return balance;
+    }
+
+    public BigDecimal debit(BigDecimal amount) {
+        validateAmount(amount);
+
+        BigDecimal remaining = balance.subtract(amount);
+        if (remaining.signum() < 0) {
+            throw new InsufficientFundsException(id, amount, balance);
+        }
+
+        balance = remaining;
+        return balance;
+    }
+
+    private static void validateAmount(BigDecimal amount) {
+        Objects.requireNonNull(amount, "Amount is required");
+        if (amount.signum() <= 0) {
+            throw new IllegalArgumentException("Amount must be greater than zero");
+        }
+        if (amount.scale() > 4) {
+            throw new IllegalArgumentException("Amount must have at most 4 decimal places");
+        }
     }
 }
