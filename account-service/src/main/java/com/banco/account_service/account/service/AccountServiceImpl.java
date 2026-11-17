@@ -36,8 +36,6 @@ public class AccountServiceImpl implements AccountService {
             Account savedAccount = accountRepository.saveAndFlush(account);
             return toResponse(savedAccount);
         } catch (DataIntegrityViolationException ex) {
-            // La constraint UNIQUE(number) es la última línea de defensa.
-            // Dos peticiones concurrentes pueden pasar el existsByNumber; una falla aquí.
             throw new AccountAlreadyExistsException(number);
         }
     }
