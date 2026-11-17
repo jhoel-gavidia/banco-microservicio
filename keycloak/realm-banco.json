@@ -97,6 +97,21 @@
       "realmRoles": ["account_read", "account_write"]
     },
     {
+      "username": "carol",
+      "enabled": true,
+      "email": "carol@banco.local",
+      "emailVerified": true,
+      "firstName": "Carol",
+      "lastName": "Solo",
+      "credentials": [
+        { "type": "password", "value": "carol", "temporary": false }
+      ],
+      "attributes": {
+        "customerId": ["44444444-4444-4444-8444-444444444444"]
+      },
+      "realmRoles": ["account_read"]
+    },
+    {
       "username": "admin",
       "enabled": true,
       "email": "admin@banco.local",
