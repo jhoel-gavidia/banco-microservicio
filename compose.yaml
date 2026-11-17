@@ -1,0 +1,20 @@
+services:
+  accounts-db:
+    image: postgres:18-alpine
+    container_name: accounts-db
+    environment:
+      POSTGRES_DB: accounts_db
+      POSTGRES_USER: accounts
+      POSTGRES_PASSWORD: accounts
+    ports:
+      - "5432:5432"
+    volumes:
+      - accounts-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U accounts -d accounts_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  accounts-db-data:

@@ -1,0 +1,25 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: account-service
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/accounts_db}
+    username: ${DB_USER:accounts}
+    password: ${DB_PASSWORD:accounts}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
