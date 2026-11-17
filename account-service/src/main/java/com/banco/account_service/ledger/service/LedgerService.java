@@ -8,9 +8,19 @@ import java.util.UUID;
 
 public interface LedgerService {
 
-    LedgerEntryResponse deposit(UUID accountId, BigDecimal amount, String reference);
+    LedgerEntryResponse deposit(
+            UUID accountId,
+            BigDecimal amount,
+            String reference,
+            String idempotencyKey
+    );
 
-    LedgerEntryResponse withdraw(UUID accountId, BigDecimal amount, String reference);
+    LedgerEntryResponse withdraw(
+            UUID accountId,
+            BigDecimal amount,
+            String reference,
+            String idempotencyKey
+    );
 
     List<LedgerEntryResponse> getMovements(UUID accountId);
 }

@@ -23,6 +23,8 @@ Endpoints:
 
 `reference` la elige el cliente y es obligatoria. Se guarda en el asiento y `UNIQUE (account_id, reference, type)` evita que el mismo movimiento se registre dos veces; repetirla devuelve 409. Retirar más de lo disponible devuelve 422.
 
+Los POST aceptan además el header opcional `Idempotency-Key`. Repetiendo la misma clave con el mismo body se devuelve la respuesta guardada sin insertar otro asiento; con otro body da 409. Solo se guardan respuestas exitosas: si el movimiento falla, la transacción se revierte y la clave queda libre para reintentar.
+
 Los errores vienen en RFC 7807. Fíjate en `type`: es un identificador estable, no una URL que se visita. Es lo que el cliente debería usar para decidir qué hacer; el `detail` es para leer, no para programar contra él.
 
 ## Tests
@@ -53,6 +55,8 @@ Cosas de versión que conviene recordar:
 - Boot 4 no trae `@AutoConfigureTestDatabase` ni `spring.test.database.replace`.
 - `DynamicPropertyRegistry` solo tiene `add()` (no `addFirst()`).
 - Testcontainers 2.x: `org.testcontainers.postgresql.PostgreSQLContainer`, y la clase no es genérica (sin `<>`).
+- Boot 4 usa Jackson 3: `tools.jackson.databind.ObjectMapper` y `tools.jackson.core.JacksonException`. Los imports `com.fasterxml.jackson.databind.*` no compilan, aunque `jackson-annotations` 2 siga en el classpath.
+- `HttpStatus.UNPROCESSABLE_ENTITY` está deprecado; en Spring 7 es `HttpStatus.UNPROCESSABLE_CONTENT`.
 
 ## Decisiones
 
@@ -61,3 +65,4 @@ Cosas de versión que conviene recordar:
 - `saveAndFlush` dentro del `try`: si no, el error de UNIQUE por concurrencia sale en el commit, fuera del catch, y no se puede traducir a `AccountAlreadyExistsException`.
 - `AccountMapper` (MapStruct) solo convierte entidad → DTO. En el pom los annotation processors van Lombok antes que MapStruct, para que MapStruct vea los getters generados.
 - `LedgerEntry` no lleva `@Immutable` de Hibernate: en Hibernate 7 no se puede combinar con `@Generated(event = INSERT)` porque el re-read de `created_at` intenta un lock WRITE sobre una entidad read-only y revienta. La inmutabilidad la garantiza el trigger `trg_ledger_immutable` de la V2 y que no existe ningún path de UPDATE/DELETE en el código.
+- Idempotencia: la PK de `idempotency_keys` es `(customer_id, idempotency_key)`, y el `customer_id` se saca de la cuenta. El hash SHA-256 cubre tipo + amount + reference, aplicando `stripTrailingZeros()` para que `100.50` y `100.5` den el mismo valor. Solo se cachean respuestas exitosas.

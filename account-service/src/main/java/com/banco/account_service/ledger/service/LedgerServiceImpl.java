@@ -3,19 +3,28 @@ package com.banco.account_service.ledger.service;
 import com.banco.account_service.account.Account;
 import com.banco.account_service.account.exception.AccountNotFoundException;
 import com.banco.account_service.account.repository.AccountRepository;
+import com.banco.account_service.idempotency.IdempotencyService;
+import com.banco.account_service.idempotency.IdempotencyService.StoredResponse;
 import com.banco.account_service.ledger.LedgerEntry;
 import com.banco.account_service.ledger.LedgerEntryType;
 import com.banco.account_service.ledger.dto.LedgerEntryResponse;
 import com.banco.account_service.ledger.exception.DuplicateReferenceException;
 import com.banco.account_service.ledger.mapper.LedgerEntryMapper;
 import com.banco.account_service.ledger.repository.LedgerEntryRepository;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -26,27 +35,51 @@ public class LedgerServiceImpl implements LedgerService {
     private final AccountRepository accountRepository;
     private final LedgerEntryRepository ledgerEntryRepository;
     private final LedgerEntryMapper ledgerEntryMapper;
+    private final IdempotencyService idempotencyService;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional
-    public LedgerEntryResponse deposit(UUID accountId, BigDecimal amount, String reference) {
-        return recordMovement(accountId, amount, reference, LedgerEntryType.CREDIT);
+    public LedgerEntryResponse deposit(
+            UUID accountId,
+            BigDecimal amount,
+            String reference,
+            String idempotencyKey
+    ) {
+        return recordMovement(accountId, amount, reference, LedgerEntryType.CREDIT, idempotencyKey);
     }
 
     @Override
     @Transactional
-    public LedgerEntryResponse withdraw(UUID accountId, BigDecimal amount, String reference) {
-        return recordMovement(accountId, amount, reference, LedgerEntryType.DEBIT);
+    public LedgerEntryResponse withdraw(
+            UUID accountId,
+            BigDecimal amount,
+            String reference,
+            String idempotencyKey
+    ) {
+        return recordMovement(accountId, amount, reference, LedgerEntryType.DEBIT, idempotencyKey);
     }
 
     private LedgerEntryResponse recordMovement(
             UUID accountId,
             BigDecimal amount,
             String reference,
-            LedgerEntryType type
+            LedgerEntryType type,
+            String idempotencyKey
     ) {
         Account account = accountRepository.findByIdForUpdate(accountId)
                 .orElseThrow(() -> new AccountNotFoundException(accountId));
+
+        boolean idempotent = idempotencyKey != null && !idempotencyKey.isBlank();
+
+        if (idempotent) {
+            Optional<StoredResponse> replay = idempotencyService.begin(
+                    account.getCustomerId(), idempotencyKey, hash(type, amount, reference)
+            );
+            if (replay.isPresent()) {
+                return deserialize(replay.get().body());
+            }
+        }
 
         if (ledgerEntryRepository.existsByAccountIdAndReferenceAndType(accountId, reference, type)) {
             throw new DuplicateReferenceException(accountId, reference, type);
@@ -60,11 +93,20 @@ public class LedgerServiceImpl implements LedgerService {
                 ? LedgerEntry.credit(account, amount, balanceAfter, reference)
                 : LedgerEntry.debit(account, amount, balanceAfter, reference);
 
+        LedgerEntryResponse response;
         try {
-            return ledgerEntryMapper.toResponse(ledgerEntryRepository.saveAndFlush(entry));
+            response = ledgerEntryMapper.toResponse(ledgerEntryRepository.saveAndFlush(entry));
         } catch (DataIntegrityViolationException ex) {
             throw new DuplicateReferenceException(accountId, reference, type);
         }
+
+        if (idempotent) {
+            idempotencyService.complete(
+                    account.getCustomerId(), idempotencyKey, 201, serialize(response)
+            );
+        }
+
+        return response;
     }
 
     @Override
@@ -76,5 +118,33 @@ public class LedgerServiceImpl implements LedgerService {
         return ledgerEntryRepository.findByAccountIdOrderByCreatedAtDesc(accountId).stream()
                 .map(ledgerEntryMapper::toResponse)
                 .toList();
+    }
+
+    private static String hash(LedgerEntryType type, BigDecimal amount, String reference) {
+        String payload = type.name() + "|" + amount.stripTrailingZeros().toPlainString()
+                + "|" + reference;
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(payload.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is not available", ex);
+        }
+    }
+
+    private LedgerEntryResponse deserialize(String body) {
+        try {
+            return objectMapper.readValue(body, LedgerEntryResponse.class);
+        } catch (JacksonException ex) {
+            throw new IllegalStateException("Stored idempotent response is unreadable", ex);
+        }
+    }
+
+    private String serialize(LedgerEntryResponse response) {
+        try {
+            return objectMapper.writeValueAsString(response);
+        } catch (JacksonException ex) {
+            throw new IllegalStateException("Could not store idempotent response", ex);
+        }
     }
 }

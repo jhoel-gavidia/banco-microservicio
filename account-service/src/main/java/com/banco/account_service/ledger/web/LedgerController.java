@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -27,21 +28,27 @@ public class LedgerController {
     @PostMapping("/deposits")
     public ResponseEntity<LedgerEntryResponse> deposit(
             @PathVariable UUID accountId,
-            @Valid @RequestBody MoneyMovementRequest request
+            @Valid @RequestBody MoneyMovementRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey
     ) {
         return ResponseEntity
                 .status(HttpStatus.CREATED)
-                .body(ledgerService.deposit(accountId, request.amount(), request.reference()));
+                .body(ledgerService.deposit(
+                        accountId, request.amount(), request.reference(), idempotencyKey
+                ));
     }
 
     @PostMapping("/withdrawals")
     public ResponseEntity<LedgerEntryResponse> withdraw(
             @PathVariable UUID accountId,
-            @Valid @RequestBody MoneyMovementRequest request
+            @Valid @RequestBody MoneyMovementRequest request,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey
     ) {
         return ResponseEntity
                 .status(HttpStatus.CREATED)
-                .body(ledgerService.withdraw(accountId, request.amount(), request.reference()));
+                .body(ledgerService.withdraw(
+                        accountId, request.amount(), request.reference(), idempotencyKey
+                ));
     }
 
     @GetMapping("/movements")

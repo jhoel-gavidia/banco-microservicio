@@ -3,6 +3,8 @@ package com.banco.account_service.account.web;
 import com.banco.account_service.account.exception.AccountAlreadyExistsException;
 import com.banco.account_service.account.exception.AccountNotFoundException;
 import com.banco.account_service.account.exception.InsufficientFundsException;
+import com.banco.account_service.idempotency.exception.IdempotencyKeyInProgressException;
+import com.banco.account_service.idempotency.exception.IdempotencyKeyReusedException;
 import com.banco.account_service.ledger.exception.DuplicateReferenceException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -119,6 +121,28 @@ public class GlobalExceptionHandler {
         problem.setProperty("accountId", ex.getAccountId());
         problem.setProperty("reference", ex.getReference());
         problem.setProperty("type", ex.getType());
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    @ExceptionHandler(IdempotencyKeyReusedException.class)
+    public ResponseEntity<ProblemDetail> handleIdempotencyKeyReused(IdempotencyKeyReusedException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, ex.getMessage()
+        );
+        problem.setType(URI.create("https://banco.local/problems/idempotency-key-reused"));
+        problem.setTitle("Idempotency-Key reused");
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    @ExceptionHandler(IdempotencyKeyInProgressException.class)
+    public ResponseEntity<ProblemDetail> handleIdempotencyKeyInProgress(IdempotencyKeyInProgressException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, ex.getMessage()
+        );
+        problem.setType(URI.create("https://banco.local/problems/idempotency-key-in-progress"));
+        problem.setTitle("Idempotency-Key in progress");
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
     }
