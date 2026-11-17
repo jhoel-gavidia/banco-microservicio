@@ -21,6 +21,8 @@ Endpoints:
 - `GET /api/v1/accounts/{id}/movements` → 200 con el historial.
 - `GET /actuator/health`.
 
+Solo las cuentas `ACTIVE` pueden mover saldo. Un depósito o retiro sobre `BLOCKED` o `CLOSED` responde 409 con `type` `https://banco.local/problems/account-not-active`, sin cambiar el saldo ni dejar una clave de idempotencia pendiente.
+
 `reference` la elige el cliente y es obligatoria. Se guarda en el asiento y `UNIQUE (account_id, reference, type)` evita que el mismo movimiento se registre dos veces; repetirla devuelve 409. Retirar más de lo disponible devuelve 422.
 
 Los POST aceptan además el header opcional `Idempotency-Key`. Repetiendo la misma clave con el mismo body se devuelve la respuesta guardada sin insertar otro asiento; con otro body da 409. Solo se guardan respuestas exitosas: si el movimiento falla, la transacción se revierte y la clave queda libre para reintentar.

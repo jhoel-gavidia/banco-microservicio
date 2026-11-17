@@ -1,6 +1,7 @@
 package com.banco.account_service.account.web;
 
 import com.banco.account_service.account.exception.AccountAlreadyExistsException;
+import com.banco.account_service.account.exception.AccountNotActiveException;
 import com.banco.account_service.account.exception.AccountNotFoundException;
 import com.banco.account_service.account.exception.InsufficientFundsException;
 import com.banco.account_service.idempotency.exception.IdempotencyKeyInProgressException;
@@ -146,6 +147,17 @@ public class GlobalExceptionHandler {
         );
         problem.setType(URI.create("https://banco.local/problems/idempotency-key-in-progress"));
         problem.setTitle("Idempotency-Key in progress");
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    @ExceptionHandler(AccountNotActiveException.class)
+    public ResponseEntity<ProblemDetail> handleAccountNotActive(AccountNotActiveException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, ex.getMessage()
+        );
+        problem.setType(URI.create("https://banco.local/problems/account-not-active"));
+        problem.setTitle("Account not active");
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
     }

@@ -1,5 +1,6 @@
 package com.banco.account_service.account;
 
+import com.banco.account_service.account.exception.AccountNotActiveException;
 import com.banco.account_service.account.exception.InsufficientFundsException;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
@@ -86,13 +87,21 @@ public class Account {
         return currency == null ? null : currency.code();
     }
 
+    public void requireActive() {
+        if (status != Status.ACTIVE) {
+            throw new AccountNotActiveException(id, status);
+        }
+    }
+
     public BigDecimal credit(BigDecimal amount) {
+        requireActive();
         validateAmount(amount);
         balance = balance.add(amount);
         return balance;
     }
 
     public BigDecimal debit(BigDecimal amount) {
+        requireActive();
         validateAmount(amount);
 
         BigDecimal remaining = balance.subtract(amount);
