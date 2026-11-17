@@ -1,6 +1,6 @@
 # banco-microservicio
 
-Account-service: Spring Boot 4.1, PostgreSQL 18, Flyway y Testcontainers. Se construye paso a paso, con un commit por cada cambio.
+Account-service: Spring Boot 4.1, PostgreSQL 18, Flyway y Testcontainers.
 
 ## Arrancarlo
 
@@ -25,9 +25,47 @@ Endpoints:
 
 Los POST aceptan además el header opcional `Idempotency-Key`. Repetiendo la misma clave con el mismo body se devuelve la respuesta guardada sin insertar otro asiento; con otro body da 409. Solo se guardan respuestas exitosas: si el movimiento falla, la transacción se revierte y la clave queda libre para reintentar.
 
-Todas las rutas exigen un Bearer token de Keycloak. Los roles del realm son `account_read` (GET) y `account_write` (POST); `admin` ve todas las cuentas. Los datos están además filtrados por propietario: si la cuenta no es tuya responde 404, no 403, para no revelar que existe.
+Todas las rutas exigen un Bearer token de Keycloak. Cómo pedirlo, qué roles hay y cómo se filtran los datos por propietario está en [Seguridad](#seguridad).
 
-Los errores vienen en RFC 7807. Fíjate en `type`: es un identificador estable, no una URL que se visita. Es lo que el cliente debería usar para decidir qué hacer; el `detail` es para leer, no para programar contra él.
+Los errores vienen en RFC 7807. Fíjate en `type`: es un identificador estable, no una URL que se visita. Es lo que el cliente debería usar para decidir qué hacer; el `detail` es para leer, no para programar contra él. Los de autenticación y autorización son `https://banco.local/problems/unauthorized` y `https://banco.local/problems/forbidden`, respectivamente.
+
+## Seguridad
+
+El compose levanta también Keycloak en `http://localhost:8080`. El realm `banco` se importa desde `keycloak/realm-banco.json` y el cliente `account-service` tiene Direct Access Grants habilitado solo para desarrollo local. La app es un resource server: valida el JWT, no maneja sesiones ni contraseñas propias.
+
+Para pedir un token y llamar a la API:
+
+```powershell
+$body = @{
+  client_id     = "account-service"
+  client_secret = "account-service-secret"
+  grant_type    = "password"
+  username      = "alice"
+  password      = "alice"
+  scope         = "openid"
+}
+$token = (Invoke-RestMethod http://localhost:8080/realms/banco/protocol/openid-connect/token -Body $body).access_token
+
+curl.exe -H "Authorization: Bearer $token" http://localhost:8081/api/v1/accounts
+```
+
+Usuarios del realm:
+
+| usuario | claim `customerId` | roles |
+| --- | --- | --- |
+| `alice` | `11111111-1111-4111-8111-111111111111` | `account_read`, `account_write` |
+| `bob` | `22222222-2222-4222-8222-222222222222` | `account_read`, `account_write` |
+| `carol` | `44444444-4444-4444-8444-444444444444` | `account_read` |
+| `admin` | `33333333-3333-4333-8333-333333333333` | `admin` |
+
+`account_read` habilita los GET y `account_write` los POST. `admin` ve todas las cuentas; los demás solo las suyas. La propiedad se comprueba en la capa de datos: los repositorios filtran por `customerId` y una cuenta ajena responde 404, no 403, para no revelar que existe. El `customerId` no se acepta en el body de creación: se toma del token, así nadie puede abrir una cuenta a nombre de otro.
+
+Dos detalles que valen la pena saber:
+
+- Spring Security 7 no lee `realm_access.roles` por defecto: su converter solo mira `scope`/`scp`. `SecurityConfig` registra un `JwtAuthenticationConverter` que transforma esos roles en `ROLE_*` en mayúsculas. Sin eso, todo daría 403 aunque el token fuera válido.
+- El `JwtDecoder` se arma con `NimbusJwtDecoder.withJwkSetUri(...)` dentro del bean, en lugar de usar `issuer-uri` directamente, para no descargar el JWKS al arrancar el contexto de los tests. La validación del issuer se añade aparte con `JwtValidators.createDefaultWithIssuer(...)`.
+
+Los 401 y 403 se escriben en `application/problem+json` desde `AuthenticationEntryPoint` y `AccessDeniedHandler`, porque los rechaza la cadena de filtros antes de llegar al controller. El `@RestControllerAdvice` cubre las mismas excepciones si algún día se lanzan dentro de él, reutilizando los mismos `type`.
 
 ## Tests
 
