@@ -81,6 +81,8 @@ public class LedgerServiceImpl implements LedgerService {
                 : accountRepository.findByIdForUpdateAndCustomerId(accountId, customer.customerId())
                         .orElseThrow(() -> new AccountNotFoundException(accountId));
 
+        account.requireActive();
+
         boolean idempotent = idempotencyKey != null && !idempotencyKey.isBlank();
 
         if (idempotent) {
