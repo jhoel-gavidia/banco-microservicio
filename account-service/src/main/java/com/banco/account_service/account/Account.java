@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 
 @Entity
@@ -20,7 +21,7 @@ public class Account {
     private UUID id;
 
     @Column(name = "customer_id", nullable = false)
-    private UUID customer_id;
+    private UUID customerId;
 
     @Column(name = "number", nullable = false, length = 34)
     private String number;
@@ -46,4 +47,30 @@ public class Account {
             insertable = false
     )
     private Instant createdAt;
+
+    public static Account open(
+            UUID customerId,
+            String number,
+            String currency
+    ) {
+        Objects.requireNonNull(customerId, "Customer ID is required");
+
+        if (number == null || number.isBlank() || number.length() > 34) {
+            throw new IllegalArgumentException("Invalid account number");
+        }
+
+        if (currency == null || !currency.matches("[A-Z]{3}")) {
+            throw new IllegalArgumentException("Invalid currency");
+        }
+
+        Account account = new Account();
+
+        account.customerId = customerId;
+        account.number = number;
+        account.currency = currency;
+        account.balance = BigDecimal.ZERO;
+        account.status = Status.ACTIVE;
+
+        return account;
+    }
 }
