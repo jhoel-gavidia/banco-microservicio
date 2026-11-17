@@ -19,11 +19,15 @@ public class IdempotencyKeyId implements Serializable {
     @Column(name = "customer_id", nullable = false)
     private UUID customerId;
 
+    @Column(name = "account_id", nullable = false)
+    private UUID accountId;
+
     @Column(name = "idempotency_key", nullable = false, length = 100)
     private String idempotencyKey;
 
-    public IdempotencyKeyId(UUID customerId, String idempotencyKey) {
+    public IdempotencyKeyId(UUID customerId, UUID accountId, String idempotencyKey) {
         this.customerId = customerId;
+        this.accountId = accountId;
         this.idempotencyKey = idempotencyKey;
     }
 }
