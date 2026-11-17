@@ -16,7 +16,12 @@ Endpoints:
 
 - `POST /api/v1/accounts` → 201 con header `Location`. Body: `customerId`, `number`, `currency`.
 - `GET /api/v1/accounts/{id}` → 200 o 404.
+- `POST /api/v1/accounts/{id}/deposits` → 201. Body: `amount`, `reference`.
+- `POST /api/v1/accounts/{id}/withdrawals` → 201. Body: `amount`, `reference`.
+- `GET /api/v1/accounts/{id}/movements` → 200 con el historial.
 - `GET /actuator/health`.
+
+`reference` la elige el cliente y es obligatoria. Se guarda en el asiento y `UNIQUE (account_id, reference, type)` evita que el mismo movimiento se registre dos veces; repetirla devuelve 409. Retirar más de lo disponible devuelve 422.
 
 Los errores vienen en RFC 7807. Fíjate en `type`: es un identificador estable, no una URL que se visita. Es lo que el cliente debería usar para decidir qué hacer; el `detail` es para leer, no para programar contra él.
 
@@ -55,3 +60,4 @@ Cosas de versión que conviene recordar:
 - Los CHECK, UNIQUE y FK están en la BD, además de la validación del DTO. No nos fiamos solo de Bean Validation.
 - `saveAndFlush` dentro del `try`: si no, el error de UNIQUE por concurrencia sale en el commit, fuera del catch, y no se puede traducir a `AccountAlreadyExistsException`.
 - `AccountMapper` (MapStruct) solo convierte entidad → DTO. En el pom los annotation processors van Lombok antes que MapStruct, para que MapStruct vea los getters generados.
+- `LedgerEntry` no lleva `@Immutable` de Hibernate: en Hibernate 7 no se puede combinar con `@Generated(event = INSERT)` porque el re-read de `created_at` intenta un lock WRITE sobre una entidad read-only y revienta. La inmutabilidad la garantiza el trigger `trg_ledger_immutable` de la V2 y que no existe ningún path de UPDATE/DELETE en el código.

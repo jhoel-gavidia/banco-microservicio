@@ -15,7 +15,6 @@ import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import org.hibernate.annotations.Immutable;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -24,7 +23,6 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "ledger_entries")
-@Immutable
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class LedgerEntry {

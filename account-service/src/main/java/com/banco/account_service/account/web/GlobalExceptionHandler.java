@@ -2,6 +2,8 @@ package com.banco.account_service.account.web;
 
 import com.banco.account_service.account.exception.AccountAlreadyExistsException;
 import com.banco.account_service.account.exception.AccountNotFoundException;
+import com.banco.account_service.account.exception.InsufficientFundsException;
+import com.banco.account_service.ledger.exception.DuplicateReferenceException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -91,5 +93,33 @@ public class GlobalExceptionHandler {
         problem.setTitle("Invalid argument");
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
+    @ExceptionHandler(InsufficientFundsException.class)
+    public ResponseEntity<ProblemDetail> handleInsufficientFunds(InsufficientFundsException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage()
+        );
+        problem.setType(URI.create("https://banco.local/problems/insufficient-funds"));
+        problem.setTitle("Insufficient funds");
+        problem.setProperty("accountId", ex.getAccountId());
+        problem.setProperty("requested", ex.getRequested());
+        problem.setProperty("available", ex.getAvailable());
+
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT).body(problem);
+    }
+
+    @ExceptionHandler(DuplicateReferenceException.class)
+    public ResponseEntity<ProblemDetail> handleDuplicateReference(DuplicateReferenceException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.CONFLICT, ex.getMessage()
+        );
+        problem.setType(URI.create("https://banco.local/problems/duplicate-reference"));
+        problem.setTitle("Duplicate reference");
+        problem.setProperty("accountId", ex.getAccountId());
+        problem.setProperty("reference", ex.getReference());
+        problem.setProperty("type", ex.getType());
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
     }
 }
