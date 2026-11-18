@@ -95,7 +95,7 @@ Los 401 y 403 se escriben en `application/problem+json` desde `AuthenticationEnt
 .\mvnw.cmd test "-Dtest=AccountServiceImplTest"
 
 # todo junto (unitarios + integración):
-.\mvnw.cmd test "-Dtest=AccountServiceImplTest,AccountServiceApplicationTests,AccountRepositoryIT,AccountConcurrencyIT"
+.\mvnw.cmd test "-Dtest=AccountServiceImplTest,AccountServiceApplicationTests,AccountRepositoryIT,AccountConcurrencyIT,IdempotencyConcurrencyIT"
 
 # uno solo:
 .\mvnw.cmd test "-Dtest=AccountRepositoryIT"
@@ -128,3 +128,4 @@ Cosas de versión que conviene recordar:
 - Idempotencia: la PK de `idempotency_keys` es `(customer_id, account_id, idempotency_key)`; el cliente y la cuenta se sacan de la cuenta destino. Así la misma clave en dos cuentas propias son dos operaciones distintas. El hash SHA-256 cubre cuenta + tipo + amount + reference, aplicando `stripTrailingZeros()` para que `100.50` y `100.5` den el mismo valor. Solo se cachean respuestas exitosas. La migración V4 descartó las claves guardadas con el esquema anterior porque no era posible derivar su `account_id`.
 - El historial se ordena por `ledger_entries.entry_seq`, un valor de secuencia asignado en el INSERT. `created_at` usa `clock_timestamp()` para reflejar el momento del insert, pero no es la clave de ordenación: `now()` es estable por transacción y dos escrituras serializadas por el `FOR UPDATE` de la cuenta podían quedar con fechas invertidas respecto a `balance_after`.
 - Los decimales del importe se validan contra `CurrencyCode.fractionDigits()`: USD y EUR admiten 2, JPY 0, KWD 3. Se cuenta sobre `stripTrailingZeros()`, así que `100.500` es válido en USD pero `10.0001` no. El JDK devuelve `-1` para monedas sin fracción estándar (por ejemplo XAU) y en ese caso se exigen importes enteros. El error es un 422 con `type` `https://banco.local/problems/invalid-amount-scale`. No hace falta migración: `NUMERIC(19,4)` sigue siendo la cota superior del DTO y cubre las monedas ISO con 4 decimales; reducir la escala sería destructivo. La BD normaliza la escala a 4 al guardar.
+- La reserva de una `Idempotency-Key` es un `INSERT ... ON CONFLICT DO NOTHING`, no un `saveAndFlush` con `catch`. Usar una violación de PK como control de flujo dejaba la transacción en estado `aborted` en PostgreSQL y, además, el `findById` posterior podía devolver la entidad fallida del persistence context en vez de la fila ganadora: un rival con estado `COMPLETED` se confundía con `IN_PROGRESS`. Con el insert condicional se relee la fila real y se devuelve el replay o el 409 que corresponda. `IdempotencyConcurrencyIT` cubre ambos casos con dos transacciones solapadas.
