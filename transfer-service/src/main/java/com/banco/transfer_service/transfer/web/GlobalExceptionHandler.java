@@ -1,5 +1,6 @@
 package com.banco.transfer_service.transfer.web;
 
+import com.banco.transfer_service.client.AccountServiceException;
 import com.banco.transfer_service.idempotency.exception.IdempotencyKeyInProgressException;
 import com.banco.transfer_service.idempotency.exception.IdempotencyKeyReusedException;
 import com.banco.transfer_service.security.SecurityProblems;
@@ -96,6 +97,21 @@ public class GlobalExceptionHandler {
         problem.setTitle("Idempotency-Key in progress");
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    @ExceptionHandler(AccountServiceException.class)
+    public ResponseEntity<ProblemDetail> handleAccountService(AccountServiceException ex) {
+        HttpStatus status = HttpStatus.resolve(ex.getStatus().value());
+        if (status == null) {
+            status = HttpStatus.BAD_GATEWAY;
+        }
+
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, ex.getMessage());
+        problem.setType(URI.create("https://banco.local/problems/account-service-error"));
+        problem.setTitle("Account service error");
+        problem.setProperty("accountId", ex.getAccountId());
+
+        return ResponseEntity.status(status).body(problem);
     }
 
     @ExceptionHandler(AccessDeniedException.class)

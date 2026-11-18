@@ -1,5 +1,6 @@
 package com.banco.transfer_service.transfer.service;
 
+import com.banco.transfer_service.client.AccountServiceClient;
 import com.banco.transfer_service.idempotency.IdempotencyService;
 import com.banco.transfer_service.idempotency.IdempotencyService.StoredResponse;
 import com.banco.transfer_service.security.CustomerContext;
@@ -30,6 +31,7 @@ public class TransferServiceImpl implements TransferService {
     private final TransferRepository repository;
     private final TransferMapper mapper;
     private final IdempotencyService idempotencyService;
+    private final AccountServiceClient accountServiceClient;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -44,6 +46,9 @@ public class TransferServiceImpl implements TransferService {
         }
 
         Money money = Money.of(request.amount(), request.currency());
+
+        accountServiceClient.getAccount(request.sourceAccountId(), customer.customerId());
+
         String requestHash = hash(customer.customerId(), request, money);
 
         Optional<StoredResponse> replay = idempotencyService.begin(
