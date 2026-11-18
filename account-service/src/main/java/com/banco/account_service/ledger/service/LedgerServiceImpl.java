@@ -5,6 +5,8 @@ import com.banco.account_service.account.exception.AccountNotFoundException;
 import com.banco.account_service.account.repository.AccountRepository;
 import com.banco.account_service.idempotency.IdempotencyService;
 import com.banco.account_service.idempotency.IdempotencyService.StoredResponse;
+import com.banco.account_service.outbox.OutboxService;
+import com.banco.account_service.outbox.event.AccountMovementEvent;
 import com.banco.account_service.ledger.LedgerEntry;
 import com.banco.account_service.ledger.LedgerEntryType;
 import com.banco.account_service.ledger.dto.LedgerEntryResponse;
@@ -38,6 +40,7 @@ public class LedgerServiceImpl implements LedgerService {
     private final LedgerEntryMapper ledgerEntryMapper;
     private final IdempotencyService idempotencyService;
     private final ObjectMapper objectMapper;
+    private final OutboxService outboxService;
 
     @Override
     @Transactional
@@ -109,7 +112,18 @@ public class LedgerServiceImpl implements LedgerService {
 
         LedgerEntryResponse response;
         try {
-            response = ledgerEntryMapper.toResponse(ledgerEntryRepository.saveAndFlush(entry));
+            LedgerEntry saved = ledgerEntryRepository.saveAndFlush(entry);
+            outboxService.record("ACCOUNT", new AccountMovementEvent(
+                    UUID.randomUUID(),
+                    accountId,
+                    account.getCustomerId(),
+                    type,
+                    amount,
+                    balanceAfter,
+                    reference,
+                    saved.getCreatedAt()
+            ));
+            response = ledgerEntryMapper.toResponse(saved);
         } catch (DataIntegrityViolationException ex) {
             throw new DuplicateReferenceException(accountId, reference, type);
         }

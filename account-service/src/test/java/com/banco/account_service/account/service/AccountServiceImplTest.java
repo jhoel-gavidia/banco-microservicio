@@ -6,6 +6,7 @@ import com.banco.account_service.account.exception.AccountAlreadyExistsException
 import com.banco.account_service.account.exception.AccountNotFoundException;
 import com.banco.account_service.account.mapper.AccountMapper;
 import com.banco.account_service.account.repository.AccountRepository;
+import com.banco.account_service.outbox.OutboxService;
 import com.banco.account_service.security.CustomerContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,6 +35,9 @@ class AccountServiceImplTest {
 
     @Mock
     private AccountMapper accountMapper;
+
+    @Mock
+    private OutboxService outboxService;
 
     @InjectMocks
     private AccountServiceImpl accountService;
