@@ -32,6 +32,8 @@ spring:
           issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8080/realms/banco}
 
 outbox:
+  publisher:
+    enabled: ${OUTBOX_PUBLISHER_ENABLED:true}
   topic: ${OUTBOX_TOPIC:account.movements.v1}
   batch-size: ${OUTBOX_BATCH_SIZE:100}
   poll-interval: ${OUTBOX_POLL_INTERVAL:500ms}
