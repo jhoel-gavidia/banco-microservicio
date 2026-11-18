@@ -15,7 +15,8 @@ public record AccountMovementEvent(
         BigDecimal amount,
         BigDecimal balanceAfter,
         String reference,
-        Instant occurredAt
+        Instant occurredAt,
+        String eventType
 ) implements DomainEvent {
 
     @Override
@@ -23,8 +24,5 @@ public record AccountMovementEvent(
         return accountId;
     }
 
-    @Override
-    public String eventType() {
-        return "ACCOUNT_MOVEMENT_RECORDED";
-    }
+
 }

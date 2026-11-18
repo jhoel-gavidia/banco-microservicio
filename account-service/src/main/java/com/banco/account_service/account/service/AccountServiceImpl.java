@@ -46,7 +46,8 @@ public class AccountServiceImpl implements AccountService {
                     customerId,
                     savedAccount.getNumber(),
                     savedAccount.getCurrency(),
-                    savedAccount.getCreatedAt()
+                    savedAccount.getCreatedAt(),
+                    "ACCOUNT_OPENED"
             ));
             return accountMapper.toResponse(savedAccount);
         } catch (DataIntegrityViolationException ex) {

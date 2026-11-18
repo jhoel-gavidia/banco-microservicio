@@ -121,7 +121,8 @@ public class LedgerServiceImpl implements LedgerService {
                     amount,
                     balanceAfter,
                     reference,
-                    saved.getCreatedAt()
+                    saved.getCreatedAt(),
+                    "ACCOUNT_MOVEMENT_RECORDED"
             ));
             response = ledgerEntryMapper.toResponse(saved);
         } catch (DataIntegrityViolationException ex) {

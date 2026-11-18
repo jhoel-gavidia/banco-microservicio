@@ -11,7 +11,8 @@ public record AccountOpenedEvent(
         UUID customerId,
         String number,
         String currency,
-        Instant occurredAt
+        Instant occurredAt,
+        String eventType
 ) implements DomainEvent {
 
     @Override
@@ -19,8 +20,5 @@ public record AccountOpenedEvent(
         return accountId;
     }
 
-    @Override
-    public String eventType() {
-        return "ACCOUNT_OPENED";
-    }
+
 }
