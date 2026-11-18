@@ -27,7 +27,7 @@ cd account-service
 .\mvnw.cmd spring-boot:run
 ```
 
-El compose levanta la BD en localhost:5432 y la app queda en http://localhost:8081.
+El compose levanta la BD en localhost:5432, Keycloak en localhost:8080 y Kafka en localhost:9092. La app queda en http://localhost:8081.
 
 Endpoints:
 
@@ -85,6 +85,27 @@ Dos detalles que valen la pena saber:
 - El `JwtDecoder` se arma con `NimbusJwtDecoder.withJwkSetUri(...)` dentro del bean, en lugar de usar `issuer-uri` directamente, para no descargar el JWKS al arrancar el contexto de los tests. La validación del issuer se añade aparte con `JwtValidators.createDefaultWithIssuer(...)`.
 
 Los 401 y 403 se escriben en `application/problem+json` desde `AuthenticationEntryPoint` y `AccessDeniedHandler`, porque los rechaza la cadena de filtros antes de llegar al controller. El `@RestControllerAdvice` cubre las mismas excepciones si algún día se lanzan dentro de él, reutilizando los mismos `type`.
+
+## Eventos
+
+Los cambios se publican en el tópico `account.movements.v1`. La clave de partición es `accountId`, así que los eventos de una misma cuenta caen siempre en la misma partición y conservan su orden. Hay dos tipos:
+
+```json
+{"eventId":"...","eventType":"ACCOUNT_OPENED","accountId":"...","customerId":"...","number":"...","currency":"EUR","occurredAt":"..."}
+{"eventId":"...","eventType":"ACCOUNT_MOVEMENT_RECORDED","accountId":"...","customerId":"...","type":"CREDIT","amount":25.50,"balanceAfter":25.5000,"reference":"...","occurredAt":"..."}
+```
+
+`eventType` va en el payload y también en la columna `event_type` del outbox. Cada `eventId` es único y es la clave de deduplicación del consumidor: la entrega es `at-least-once`, así que un mismo evento puede llegar dos veces. Guarda los `eventId` procesados y descarta los repetidos antes de aplicar el efecto.
+
+La escritura del evento y la de la cuenta o el asiento ocurren en la misma transacción de PostgreSQL. El registro queda en `outbox_events` y un publicador periódico reclama un lote con `FOR UPDATE SKIP LOCKED`, publica y marca `published_at`. Si Kafka cae, la fila sigue pendiente con `attempts` y `next_attempt_at`; al volver se reanuda con backoff. Tras agotar `max-attempts` el evento va a `account.movements.v1.dlq` y se marca como publicado para no bloquear la cola. Con varias instancias, cada una toma filas distintas.
+
+Para ver el flujo en local:
+
+```powershell
+docker exec banco-kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic account.movements.v1 --from-beginning --property print.key=true
+```
+
+Configuración por entorno: `KAFKA_BOOTSTRAP_SERVERS`, `OUTBOX_TOPIC`, `OUTBOX_PUBLISHER_ENABLED`, `OUTBOX_BATCH_SIZE`, `OUTBOX_POLL_INTERVAL`, `OUTBOX_MAX_ATTEMPTS` y `OUTBOX_RETRY_BACKOFF`. El productor usa `acks=all` e idempotencia; `max.block.ms` y `delivery.timeout.ms` están acotados para que una caída del broker no deje al publicador esperando un minuto por evento.
 
 ## Tests
 
