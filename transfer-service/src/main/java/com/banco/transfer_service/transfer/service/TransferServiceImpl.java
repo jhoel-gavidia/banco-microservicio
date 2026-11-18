@@ -3,6 +3,8 @@ package com.banco.transfer_service.transfer.service;
 import com.banco.transfer_service.client.AccountServiceClient;
 import com.banco.transfer_service.idempotency.IdempotencyService;
 import com.banco.transfer_service.idempotency.IdempotencyService.StoredResponse;
+import com.banco.transfer_service.outbox.OutboxService;
+import com.banco.transfer_service.outbox.event.TransferInitiatedEvent;
 import com.banco.transfer_service.security.CustomerContext;
 import com.banco.transfer_service.transfer.domain.Money;
 import com.banco.transfer_service.transfer.domain.Transfer;
@@ -18,6 +20,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Optional;
@@ -32,6 +35,7 @@ public class TransferServiceImpl implements TransferService {
     private final TransferMapper mapper;
     private final IdempotencyService idempotencyService;
     private final AccountServiceClient accountServiceClient;
+    private final OutboxService outboxService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -67,6 +71,19 @@ public class TransferServiceImpl implements TransferService {
         );
 
         Transfer saved = repository.saveAndFlush(transfer);
+
+        outboxService.record(new TransferInitiatedEvent(
+                UUID.randomUUID(),
+                saved.getId(),
+                saved.getCustomerId(),
+                saved.getSourceAccountId(),
+                saved.getTargetAccountId(),
+                saved.getAmount().getAmount(),
+                saved.getAmount().getCurrency(),
+                saved.getReference(),
+                Instant.now()
+        ));
+
         TransferResponse response = mapper.toResponse(saved);
 
         idempotencyService.complete(
