@@ -17,6 +17,10 @@ spring:
   flyway:
     enabled: true
 
+outbox:
+  publisher:
+    enabled: false
+
 # Nota: en Spring Boot 4 ya no existe @AutoConfigureTestDatabase ni la
 # propiedad 'spring.test.database.replace' de Boot 3.x. El reemplazo
 # automatico del DataSource por H2 desaparecio, asi que no hay que

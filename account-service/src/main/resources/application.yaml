@@ -15,11 +15,33 @@ spring:
     hibernate:
       ddl-auto: validate
 
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        acks: all
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        max.block.ms: 2000
+        request.timeout.ms: 4000
+        delivery.timeout.ms: 5000
+
   security:
     oauth2:
       resourceserver:
         jwt:
           issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8080/realms/banco}
+
+outbox:
+  publisher:
+    enabled: ${OUTBOX_PUBLISHER_ENABLED:true}
+  topic: ${OUTBOX_TOPIC:account.movements.v1}
+  batch-size: ${OUTBOX_BATCH_SIZE:100}
+  poll-interval: ${OUTBOX_POLL_INTERVAL:500ms}
+  max-attempts: ${OUTBOX_MAX_ATTEMPTS:5}
+  retry-backoff: ${OUTBOX_RETRY_BACKOFF:1s}
 
 management:
   endpoints:
