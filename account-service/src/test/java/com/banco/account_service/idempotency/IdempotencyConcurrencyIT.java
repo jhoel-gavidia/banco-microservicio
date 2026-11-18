@@ -131,7 +131,7 @@ class IdempotencyConcurrencyIT extends PostgresIntegrationTest {
         Future<Object> worker = workerExecutor.submit(() -> {
             try {
                 return ledgerService.deposit(
-                        accountId, AMOUNT, REFERENCE, key, new CustomerContext(customerId, false)
+                        accountId, AMOUNT, REFERENCE, key, new CustomerContext(customerId, false, false)
                 );
             } catch (RuntimeException ex) {
                 return ex;

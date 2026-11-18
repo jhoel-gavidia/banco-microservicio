@@ -30,7 +30,7 @@ public class AuthenticatedCustomer {
 
         UUID customerId = internal ? customerIdFromHeader() : customerIdFromJwt(jwt);
 
-        return new CustomerContext(customerId, admin || internal);
+        return new CustomerContext(customerId, admin, internal);
     }
 
     private boolean hasAuthority(Authentication authentication, String authority) {

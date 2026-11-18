@@ -78,7 +78,7 @@ public class LedgerServiceImpl implements LedgerService {
             String idempotencyKey,
             CustomerContext customer
     ) {
-        Account account = customer.admin()
+        Account account = customer.admin() || customer.internal()
                 ? accountRepository.findByIdForUpdate(accountId)
                         .orElseThrow(() -> new AccountNotFoundException(accountId))
                 : accountRepository.findByIdForUpdateAndCustomerId(accountId, customer.customerId())
