@@ -18,6 +18,8 @@ public interface TransferRepository extends JpaRepository<Transfer, UUID> {
 
     List<Transfer> findAllByCustomerIdOrderByCreatedAtDesc(UUID customerId);
 
+    List<Transfer> findAllByOrderByCreatedAtDesc();
+
     @Query("""
             select t.id from Transfer t
             where t.status in :statuses

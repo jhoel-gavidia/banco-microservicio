@@ -10,6 +10,7 @@ import com.banco.transfer_service.transfer.domain.Money;
 import com.banco.transfer_service.transfer.domain.Transfer;
 import com.banco.transfer_service.transfer.dto.CreateTransferRequest;
 import com.banco.transfer_service.transfer.dto.TransferResponse;
+import com.banco.transfer_service.transfer.exception.TransferNotFoundException;
 import com.banco.transfer_service.transfer.mapper.TransferMapper;
 import com.banco.transfer_service.transfer.repository.TransferRepository;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,7 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -91,6 +93,25 @@ public class TransferServiceImpl implements TransferService {
         );
 
         return response;
+    }
+
+    @Override
+    public TransferResponse getById(UUID id, CustomerContext customer) {
+        Transfer transfer = customer.admin()
+                ? repository.findById(id).orElseThrow(() -> new TransferNotFoundException(id))
+                : repository.findByIdAndCustomerId(id, customer.customerId())
+                        .orElseThrow(() -> new TransferNotFoundException(id));
+
+        return mapper.toResponse(transfer);
+    }
+
+    @Override
+    public List<TransferResponse> list(CustomerContext customer) {
+        List<Transfer> transfers = customer.admin()
+                ? repository.findAllByOrderByCreatedAtDesc()
+                : repository.findAllByCustomerIdOrderByCreatedAtDesc(customer.customerId());
+
+        return transfers.stream().map(mapper::toResponse).toList();
     }
 
     private String hash(UUID customerId, CreateTransferRequest request, Money money) {

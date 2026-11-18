@@ -4,6 +4,7 @@ import com.banco.transfer_service.client.AccountServiceException;
 import com.banco.transfer_service.idempotency.exception.IdempotencyKeyInProgressException;
 import com.banco.transfer_service.idempotency.exception.IdempotencyKeyReusedException;
 import com.banco.transfer_service.security.SecurityProblems;
+import com.banco.transfer_service.transfer.exception.TransferNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -97,6 +98,17 @@ public class GlobalExceptionHandler {
         problem.setTitle("Idempotency-Key in progress");
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+    }
+
+    @ExceptionHandler(TransferNotFoundException.class)
+    public ResponseEntity<ProblemDetail> handleTransferNotFound(TransferNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.NOT_FOUND, ex.getMessage()
+        );
+        problem.setType(URI.create("https://banco.local/problems/transfer-not-found"));
+        problem.setTitle("Transfer not found");
+
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
     }
 
     @ExceptionHandler(AccountServiceException.class)
