@@ -59,6 +59,12 @@ outbox:
 account-service:
   base-url: ${ACCOUNT_SERVICE_BASE_URL:http://localhost:8081}
 
+transfer:
+  orchestrator:
+    enabled: ${TRANSFER_ORCHESTRATOR_ENABLED:true}
+    poll-interval: ${TRANSFER_ORCHESTRATOR_POLL_INTERVAL:500ms}
+    batch-size: ${TRANSFER_ORCHESTRATOR_BATCH_SIZE:20}
+
 management:
   endpoints:
     web:
