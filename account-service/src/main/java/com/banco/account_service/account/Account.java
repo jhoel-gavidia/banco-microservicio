@@ -2,6 +2,7 @@ package com.banco.account_service.account;
 
 import com.banco.account_service.account.exception.AccountNotActiveException;
 import com.banco.account_service.account.exception.InsufficientFundsException;
+import com.banco.account_service.account.exception.InvalidAmountScaleException;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -113,13 +114,20 @@ public class Account {
         return balance;
     }
 
-    private static void validateAmount(BigDecimal amount) {
+    private void validateAmount(BigDecimal amount) {
         Objects.requireNonNull(amount, "Amount is required");
         if (amount.signum() <= 0) {
             throw new IllegalArgumentException("Amount must be greater than zero");
         }
-        if (amount.scale() > 4) {
-            throw new IllegalArgumentException("Amount must have at most 4 decimal places");
+
+        int maxFractionDigits = Math.max(currency.fractionDigits(), 0);
+
+        int actualFractionDigits = Math.max(amount.stripTrailingZeros().scale(), 0);
+
+        if (actualFractionDigits > maxFractionDigits) {
+            throw new InvalidAmountScaleException(
+                    amount, currency.code(), maxFractionDigits, actualFractionDigits
+            );
         }
     }
 }

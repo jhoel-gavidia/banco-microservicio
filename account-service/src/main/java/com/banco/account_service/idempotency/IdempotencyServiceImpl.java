@@ -3,7 +3,6 @@ package com.banco.account_service.idempotency;
 import com.banco.account_service.idempotency.exception.IdempotencyKeyInProgressException;
 import com.banco.account_service.idempotency.exception.IdempotencyKeyReusedException;
 import lombok.RequiredArgsConstructor;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
@@ -30,14 +29,12 @@ public class IdempotencyServiceImpl implements IdempotencyService {
         Optional<IdempotencyKey> found = repository.findById(id);
 
         if (found.isEmpty()) {
-            try {
-                repository.saveAndFlush(
-                        IdempotencyKey.start(customerId, accountId, key, requestHash)
-                );
+            int inserted = repository.insertIfAbsent(customerId, accountId, key, requestHash);
+            if (inserted > 0) {
                 return Optional.empty();
-            } catch (DataIntegrityViolationException ex) {
-                found = repository.findById(id);
             }
+
+            found = repository.findById(id);
         }
 
         IdempotencyKey existing = found.orElseThrow(() ->

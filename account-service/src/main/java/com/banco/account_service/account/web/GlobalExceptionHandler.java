@@ -4,6 +4,7 @@ import com.banco.account_service.account.exception.AccountAlreadyExistsException
 import com.banco.account_service.account.exception.AccountNotActiveException;
 import com.banco.account_service.account.exception.AccountNotFoundException;
 import com.banco.account_service.account.exception.InsufficientFundsException;
+import com.banco.account_service.account.exception.InvalidAmountScaleException;
 import com.banco.account_service.idempotency.exception.IdempotencyKeyInProgressException;
 import com.banco.account_service.idempotency.exception.IdempotencyKeyReusedException;
 import com.banco.account_service.ledger.exception.DuplicateReferenceException;
@@ -111,6 +112,20 @@ public class GlobalExceptionHandler {
         problem.setProperty("accountId", ex.getAccountId());
         problem.setProperty("requested", ex.getRequested());
         problem.setProperty("available", ex.getAvailable());
+
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT).body(problem);
+    }
+
+    @ExceptionHandler(InvalidAmountScaleException.class)
+    public ResponseEntity<ProblemDetail> handleInvalidAmountScale(InvalidAmountScaleException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage()
+        );
+        problem.setType(URI.create("https://banco.local/problems/invalid-amount-scale"));
+        problem.setTitle("Invalid amount scale");
+        problem.setProperty("currency", ex.getCurrency());
+        problem.setProperty("maxFractionDigits", ex.getMaxFractionDigits());
+        problem.setProperty("actualFractionDigits", ex.getActualFractionDigits());
 
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT).body(problem);
     }
