@@ -12,13 +12,12 @@ public record AccountOpenedEvent(
         String number,
         String currency,
         Instant occurredAt,
-        String eventType
+        String eventType,
+        String correlationId
 ) implements DomainEvent {
 
     @Override
     public UUID aggregateId() {
         return accountId;
     }
-
-
 }

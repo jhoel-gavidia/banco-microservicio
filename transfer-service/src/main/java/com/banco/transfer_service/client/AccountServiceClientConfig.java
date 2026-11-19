@@ -1,5 +1,6 @@
 package com.banco.transfer_service.client;
 
+import com.banco.transfer_service.correlation.CorrelationContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -67,6 +68,10 @@ public class AccountServiceClientConfig {
                     request.getHeaders().setBearerAuth(
                             authorized.getAccessToken().getTokenValue()
                     );
+                    String correlationId = CorrelationContext.current();
+                    if (correlationId != null && !correlationId.isBlank()) {
+                        request.getHeaders().set(CorrelationContext.HEADER, correlationId);
+                    }
                     return execution.execute(request, body);
                 })
                 .build();

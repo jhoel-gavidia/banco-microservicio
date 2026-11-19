@@ -3,6 +3,7 @@ package com.banco.transfer_service.transfer.service;
 import com.banco.transfer_service.client.AccountServiceClient;
 import com.banco.transfer_service.client.AccountServiceException;
 import com.banco.transfer_service.client.AccountServiceUnavailableException;
+import com.banco.transfer_service.correlation.CorrelationContext;
 import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import com.banco.transfer_service.outbox.OutboxService;
@@ -96,24 +97,32 @@ public class TransferOrchestrator {
             return;
         }
 
+        if (data.correlationId() != null && !data.correlationId().isBlank()) {
+            CorrelationContext.set(data.correlationId());
+        }
+
         try {
-            switch (data.status()) {
-                case PENDING -> debit(data);
-                case DEBITED, COMPLETING -> credit(data);
-                case COMPENSATING -> compensate(data);
-                default -> {
+            try {
+                switch (data.status()) {
+                    case PENDING -> debit(data);
+                    case DEBITED, COMPLETING -> credit(data);
+                    case COMPENSATING -> compensate(data);
+                    default -> {
+                    }
                 }
+            } catch (CallNotPermittedException ex) {
+                handleTransientFailure(data, circuitOpenBackoff, "account-service circuit is open");
+            } catch (BulkheadFullException ex) {
+                handleTransientFailure(data, retryBackoff, "account-service bulkhead is full");
+            } catch (AccountServiceUnavailableException ex) {
+                handleTransientFailure(data, retryBackoff, ex.getMessage());
+            } catch (AccountServiceException ex) {
+                handleAccountFailure(data, ex);
+            } catch (Exception ex) {
+                log.error("Unexpected error processing transfer {}", id, ex);
             }
-        } catch (CallNotPermittedException ex) {
-            handleTransientFailure(data, circuitOpenBackoff, "account-service circuit is open");
-        } catch (BulkheadFullException ex) {
-            handleTransientFailure(data, retryBackoff, "account-service bulkhead is full");
-        } catch (AccountServiceUnavailableException ex) {
-            handleTransientFailure(data, retryBackoff, ex.getMessage());
-        } catch (AccountServiceException ex) {
-            handleAccountFailure(data, ex);
-        } catch (Exception ex) {
-            log.error("Unexpected error processing transfer {}", id, ex);
+        } finally {
+            CorrelationContext.clear();
         }
     }
 
@@ -198,7 +207,8 @@ public class TransferOrchestrator {
                     transfer.getSourceAccountId(),
                     transfer.getAmount().getAmount(),
                     transfer.getAmount().getCurrency(),
-                    Instant.now()
+                    Instant.now(),
+                    transfer.getCorrelationId()
             ));
             repository.save(transfer);
         });
@@ -219,7 +229,8 @@ public class TransferOrchestrator {
                     transfer.getTargetAccountId(),
                     transfer.getAmount().getAmount(),
                     transfer.getAmount().getCurrency(),
-                    Instant.now()
+                    Instant.now(),
+                    transfer.getCorrelationId()
             ));
             repository.save(transfer);
         });
@@ -245,7 +256,8 @@ public class TransferOrchestrator {
                     transfer.getAmount().getAmount(),
                     transfer.getAmount().getCurrency(),
                     transfer.getFailureReason(),
-                    Instant.now()
+                    Instant.now(),
+                    transfer.getCorrelationId()
             ));
             repository.save(transfer);
         });
@@ -275,7 +287,8 @@ public class TransferOrchestrator {
             UUID targetAccountId,
             Money amount,
             String reference,
-            TransferStatus status
+            TransferStatus status,
+            String correlationId
     ) {
         static TransferData from(Transfer transfer) {
             return new TransferData(
@@ -285,7 +298,8 @@ public class TransferOrchestrator {
                     transfer.getTargetAccountId(),
                     transfer.getAmount(),
                     transfer.getReference(),
-                    transfer.getStatus()
+                    transfer.getStatus(),
+                    transfer.getCorrelationId()
             );
         }
     }

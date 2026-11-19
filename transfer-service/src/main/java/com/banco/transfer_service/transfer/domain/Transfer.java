@@ -63,17 +63,22 @@ public class Transfer {
     @Column(name = "next_attempt_at")
     private Instant nextAttemptAt;
 
+    @Column(name = "correlation_id", nullable = false, length = 128)
+    private String correlationId;
+
     public static Transfer initiate(
             UUID customerId,
             UUID sourceAccountId,
             UUID targetAccountId,
             Money amount,
-            String reference
+            String reference,
+            String correlationId
     ) {
         Objects.requireNonNull(customerId, "Customer ID is required");
         Objects.requireNonNull(sourceAccountId, "Source account ID is required");
         Objects.requireNonNull(targetAccountId, "Target account ID is required");
         Objects.requireNonNull(amount, "Amount is required");
+        Objects.requireNonNull(correlationId, "Correlation ID is required");
 
         if (sourceAccountId.equals(targetAccountId)) {
             throw new IllegalArgumentException("Source and target accounts must be different");
@@ -88,6 +93,7 @@ public class Transfer {
         transfer.targetAccountId = targetAccountId;
         transfer.amount = amount;
         transfer.reference = reference;
+        transfer.correlationId = correlationId;
         transfer.status = TransferStatus.PENDING;
         transfer.updatedAt = Instant.now();
 

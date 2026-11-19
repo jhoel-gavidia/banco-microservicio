@@ -5,6 +5,7 @@ import com.banco.account_service.account.exception.AccountNotActiveException;
 import com.banco.account_service.account.exception.AccountNotFoundException;
 import com.banco.account_service.account.exception.InsufficientFundsException;
 import com.banco.account_service.account.exception.InvalidAmountScaleException;
+import com.banco.account_service.correlation.CorrelationContext;
 import com.banco.account_service.idempotency.exception.IdempotencyKeyInProgressException;
 import com.banco.account_service.idempotency.exception.IdempotencyKeyReusedException;
 import com.banco.account_service.ledger.exception.DuplicateReferenceException;
@@ -35,7 +36,7 @@ public class GlobalExceptionHandler {
         problem.setType(URI.create("https://banco.local/problems/account-not-found"));
         problem.setTitle("Account not found");
 
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(withCorrelation(problem));
     }
 
     @ExceptionHandler(AccountAlreadyExistsException.class)
@@ -46,7 +47,7 @@ public class GlobalExceptionHandler {
         problem.setType(URI.create("https://banco.local/problems/account-already-exists"));
         problem.setTitle("Account number already in use");
 
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(withCorrelation(problem));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -63,7 +64,7 @@ public class GlobalExceptionHandler {
         );
         problem.setProperty("errors", errors);
 
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(withCorrelation(problem));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
@@ -74,7 +75,7 @@ public class GlobalExceptionHandler {
         problem.setType(URI.create("https://banco.local/problems/malformed-body"));
         problem.setTitle("Malformed request body");
 
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(withCorrelation(problem));
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
@@ -88,7 +89,7 @@ public class GlobalExceptionHandler {
         problem.setType(URI.create("https://banco.local/problems/type-mismatch"));
         problem.setTitle("Invalid parameter");
 
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(withCorrelation(problem));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
@@ -99,7 +100,7 @@ public class GlobalExceptionHandler {
         problem.setType(URI.create("https://banco.local/problems/invalid-argument"));
         problem.setTitle("Invalid argument");
 
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(withCorrelation(problem));
     }
 
     @ExceptionHandler(InsufficientFundsException.class)
@@ -113,7 +114,7 @@ public class GlobalExceptionHandler {
         problem.setProperty("requested", ex.getRequested());
         problem.setProperty("available", ex.getAvailable());
 
-        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT).body(problem);
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT).body(withCorrelation(problem));
     }
 
     @ExceptionHandler(InvalidAmountScaleException.class)
@@ -127,7 +128,7 @@ public class GlobalExceptionHandler {
         problem.setProperty("maxFractionDigits", ex.getMaxFractionDigits());
         problem.setProperty("actualFractionDigits", ex.getActualFractionDigits());
 
-        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT).body(problem);
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT).body(withCorrelation(problem));
     }
 
     @ExceptionHandler(DuplicateReferenceException.class)
@@ -141,7 +142,7 @@ public class GlobalExceptionHandler {
         problem.setProperty("reference", ex.getReference());
         problem.setProperty("type", ex.getType());
 
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(withCorrelation(problem));
     }
 
     @ExceptionHandler(IdempotencyKeyReusedException.class)
@@ -152,7 +153,7 @@ public class GlobalExceptionHandler {
         problem.setType(URI.create("https://banco.local/problems/idempotency-key-reused"));
         problem.setTitle("Idempotency-Key reused");
 
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(withCorrelation(problem));
     }
 
     @ExceptionHandler(IdempotencyKeyInProgressException.class)
@@ -163,7 +164,7 @@ public class GlobalExceptionHandler {
         problem.setType(URI.create("https://banco.local/problems/idempotency-key-in-progress"));
         problem.setTitle("Idempotency-Key in progress");
 
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(withCorrelation(problem));
     }
 
     @ExceptionHandler(AccountNotActiveException.class)
@@ -174,20 +175,25 @@ public class GlobalExceptionHandler {
         problem.setType(URI.create("https://banco.local/problems/account-not-active"));
         problem.setTitle("Account not active");
 
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem);
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(withCorrelation(problem));
     }
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ProblemDetail> handleAccessDenied(AccessDeniedException ex) {
         ProblemDetail problem = SecurityProblems.forbidden(ex.getMessage());
 
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(withCorrelation(problem));
     }
 
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ProblemDetail> handleAuthentication(AuthenticationException ex) {
         ProblemDetail problem = SecurityProblems.unauthorized(ex.getMessage());
 
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(problem);
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(withCorrelation(problem));
+    }
+
+    private ProblemDetail withCorrelation(ProblemDetail problem) {
+        problem.setProperty("correlationId", CorrelationContext.current());
+        return problem;
     }
 }
