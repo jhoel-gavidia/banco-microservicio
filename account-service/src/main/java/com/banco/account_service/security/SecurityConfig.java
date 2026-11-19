@@ -47,11 +47,11 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/accounts/**")
-                        .hasAnyRole("ADMIN", "ACCOUNT_READ")
+                        .hasAnyRole("ADMIN", "ACCOUNT_READ", "ACCOUNT_INTERNAL")
                         .requestMatchers(HttpMethod.POST, "/api/v1/accounts/*/deposits")
-                        .hasRole("ADMIN")
+                        .hasAnyRole("ADMIN", "ACCOUNT_INTERNAL")
                         .requestMatchers(HttpMethod.POST, "/api/v1/accounts", "/api/v1/accounts/**")
-                        .hasAnyRole("ADMIN", "ACCOUNT_WRITE")
+                        .hasAnyRole("ADMIN", "ACCOUNT_WRITE", "ACCOUNT_INTERNAL")
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(exceptions -> exceptions

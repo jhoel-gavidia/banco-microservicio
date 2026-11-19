@@ -1,0 +1,75 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: transfer-service
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/transfers_db}
+    username: ${DB_USER:transfers}
+    password: ${DB_PASSWORD:transfers}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+  flyway:
+    enabled: true
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        acks: all
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        max.block.ms: 2000
+        request.timeout.ms: 4000
+        delivery.timeout.ms: 5000
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8080/realms/banco}
+      client:
+        registration:
+          account-service:
+            client-id: ${ACCOUNT_CLIENT_ID:transfer-service}
+            client-secret: ${ACCOUNT_CLIENT_SECRET:transfer-service-secret}
+            authorization-grant-type: client_credentials
+            scope: openid
+        provider:
+          account-service:
+            token-uri: ${KEYCLOAK_TOKEN_URI:http://localhost:8080/realms/banco/protocol/openid-connect/token}
+
+outbox:
+  publisher:
+    enabled: ${OUTBOX_PUBLISHER_ENABLED:true}
+  topic: ${OUTBOX_TOPIC:transfer.events.v1}
+  batch-size: ${OUTBOX_BATCH_SIZE:100}
+  poll-interval: ${OUTBOX_POLL_INTERVAL:500ms}
+  max-attempts: ${OUTBOX_MAX_ATTEMPTS:5}
+  retry-backoff: ${OUTBOX_RETRY_BACKOFF:1s}
+
+account-service:
+  base-url: ${ACCOUNT_SERVICE_BASE_URL:http://localhost:8081}
+
+transfer:
+  orchestrator:
+    enabled: ${TRANSFER_ORCHESTRATOR_ENABLED:true}
+    poll-interval: ${TRANSFER_ORCHESTRATOR_POLL_INTERVAL:500ms}
+    batch-size: ${TRANSFER_ORCHESTRATOR_BATCH_SIZE:20}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized

@@ -104,7 +104,7 @@ class AccountServiceImplTest {
         stubMapper();
 
         AccountResponse response = accountService.getAccountById(
-                UUID.randomUUID(), new CustomerContext(CUSTOMER_ID, false)
+                UUID.randomUUID(), new CustomerContext(CUSTOMER_ID, false, false)
         );
 
         assertThat(response.number()).isEqualTo(NUMBER);
@@ -117,7 +117,7 @@ class AccountServiceImplTest {
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> accountService.getAccountById(
-                accountId, new CustomerContext(CUSTOMER_ID, false)
+                accountId, new CustomerContext(CUSTOMER_ID, false, false)
         ))
                 .isInstanceOf(AccountNotFoundException.class)
                 .hasMessageContaining(accountId.toString());
