@@ -6,10 +6,14 @@ import com.banco.account_service.account.exception.AccountAlreadyExistsException
 import com.banco.account_service.account.exception.AccountNotFoundException;
 import com.banco.account_service.account.mapper.AccountMapper;
 import com.banco.account_service.account.repository.AccountRepository;
+import com.banco.account_service.correlation.CorrelationContext;
+import com.banco.account_service.outbox.DomainEvent;
 import com.banco.account_service.outbox.OutboxService;
+import com.banco.account_service.outbox.event.AccountOpenedEvent;
 import com.banco.account_service.security.CustomerContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -121,5 +125,57 @@ class AccountServiceImplTest {
         ))
                 .isInstanceOf(AccountNotFoundException.class)
                 .hasMessageContaining(accountId.toString());
+    }
+
+    @Test
+    void openAccount_recordsAccountOpenedEventWithCurrentCorrelation() {
+        CorrelationContext.set("corr-service");
+        try {
+            when(accountRepository.existsByNumber(NUMBER)).thenReturn(false);
+            when(accountRepository.saveAndFlush(any(Account.class)))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
+            stubMapper();
+
+            accountService.openAccount(CUSTOMER_ID, NUMBER, CURRENCY);
+
+            ArgumentCaptor<DomainEvent> event = ArgumentCaptor.forClass(DomainEvent.class);
+            verify(outboxService).record(eq("ACCOUNT"), event.capture());
+            assertThat(event.getValue()).isInstanceOf(AccountOpenedEvent.class);
+            AccountOpenedEvent opened = (AccountOpenedEvent) event.getValue();
+            assertThat(opened.customerId()).isEqualTo(CUSTOMER_ID);
+            assertThat(opened.number()).isEqualTo(NUMBER);
+            assertThat(opened.currency()).isEqualTo(CURRENCY);
+            assertThat(opened.eventType()).isEqualTo("ACCOUNT_OPENED");
+            assertThat(opened.correlationId()).isEqualTo("corr-service");
+        } finally {
+            CorrelationContext.clear();
+        }
+    }
+
+    @Test
+    void getAccountById_whenAdmin_usesAdminLookup() {
+        UUID accountId = UUID.randomUUID();
+        Account account = Account.open(CUSTOMER_ID, NUMBER, CURRENCY);
+        when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+        stubMapper();
+
+        accountService.getAccountById(accountId, new CustomerContext(CUSTOMER_ID, true, false));
+
+        verify(accountRepository).findById(accountId);
+        verify(accountRepository, never()).findByIdAndCustomerId(any(UUID.class), any(UUID.class));
+    }
+
+    @Test
+    void getAccountById_whenInternal_usesCustomerIdLookup() {
+        UUID accountId = UUID.randomUUID();
+        Account account = Account.open(CUSTOMER_ID, NUMBER, CURRENCY);
+        when(accountRepository.findByIdAndCustomerId(accountId, CUSTOMER_ID))
+                .thenReturn(Optional.of(account));
+        stubMapper();
+
+        accountService.getAccountById(accountId, new CustomerContext(CUSTOMER_ID, false, true));
+
+        verify(accountRepository).findByIdAndCustomerId(accountId, CUSTOMER_ID);
+        verify(accountRepository, never()).findById(any(UUID.class));
     }
 }
