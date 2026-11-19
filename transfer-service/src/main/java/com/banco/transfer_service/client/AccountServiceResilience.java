@@ -8,8 +8,10 @@ import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryRegistry;
 import io.github.resilience4j.timelimiter.TimeLimiter;
 import io.github.resilience4j.timelimiter.TimeLimiterRegistry;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -41,10 +43,23 @@ public class AccountServiceResilience {
     }
 
     public <T> T call(Supplier<T> supplier) {
+        Map<String, String> callerContext = MDC.getCopyOfContextMap();
+        Supplier<T> remote = () -> {
+            if (callerContext == null) {
+                MDC.clear();
+            } else {
+                MDC.setContextMap(callerContext);
+            }
+            try {
+                return supplier.get();
+            } finally {
+                MDC.clear();
+            }
+        };
         Supplier<T> isolated = () -> {
             try {
                 return timeLimiter.<T, CompletableFuture<T>>executeFutureSupplier(
-                        () -> bulkhead.submit((Callable<T>) supplier::get).toCompletableFuture()
+                        () -> bulkhead.submit((Callable<T>) remote::get).toCompletableFuture()
                 );
             } catch (Exception ex) {
                 throw propagate(unwrap(ex));
