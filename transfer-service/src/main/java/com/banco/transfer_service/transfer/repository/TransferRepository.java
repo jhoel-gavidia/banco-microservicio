@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -23,10 +24,12 @@ public interface TransferRepository extends JpaRepository<Transfer, UUID> {
     @Query("""
             select t.id from Transfer t
             where t.status in :statuses
+              and (t.nextAttemptAt is null or t.nextAttemptAt <= :now)
             order by t.createdAt asc, t.id asc
             """)
     List<UUID> findProcessableIds(
             @Param("statuses") Collection<TransferStatus> statuses,
+            @Param("now") Instant now,
             Pageable pageable
     );
 }

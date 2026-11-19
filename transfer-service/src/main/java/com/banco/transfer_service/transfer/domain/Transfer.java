@@ -60,6 +60,9 @@ public class Transfer {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "next_attempt_at")
+    private Instant nextAttemptAt;
+
     public static Transfer initiate(
             UUID customerId,
             UUID sourceAccountId,
@@ -94,18 +97,23 @@ public class Transfer {
     public void markDebited() {
         requireStatus("mark debited", TransferStatus.PENDING);
         status = TransferStatus.DEBITED;
+        nextAttemptAt = null;
+        failureReason = null;
         touch();
     }
 
     public void markCompleting() {
         requireStatus("mark completing", TransferStatus.DEBITED);
         status = TransferStatus.COMPLETING;
+        nextAttemptAt = null;
+        failureReason = null;
         touch();
     }
 
     public void markCompleted() {
         requireStatus("mark completed", TransferStatus.COMPLETING);
         status = TransferStatus.COMPLETED;
+        nextAttemptAt = null;
         failureReason = null;
         touch();
     }
@@ -117,6 +125,7 @@ public class Transfer {
                 TransferStatus.COMPLETING
         );
         status = TransferStatus.COMPENSATING;
+        nextAttemptAt = null;
         failureReason = truncate(reason);
         touch();
     }
@@ -124,6 +133,7 @@ public class Transfer {
     public void markCompensated() {
         requireStatus("mark compensated", TransferStatus.COMPENSATING);
         status = TransferStatus.COMPENSATED;
+        nextAttemptAt = null;
         touch();
     }
 
@@ -136,7 +146,21 @@ public class Transfer {
                 TransferStatus.COMPENSATING
         );
         status = TransferStatus.FAILED;
+        nextAttemptAt = null;
         failureReason = truncate(reason);
+        touch();
+    }
+
+    public void scheduleRetry(Instant nextAttemptAt, String reason) {
+        requireStatus(
+                "schedule retry",
+                TransferStatus.PENDING,
+                TransferStatus.DEBITED,
+                TransferStatus.COMPLETING,
+                TransferStatus.COMPENSATING
+        );
+        this.nextAttemptAt = nextAttemptAt;
+        this.failureReason = truncate(reason);
         touch();
     }
 

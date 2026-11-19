@@ -2,6 +2,9 @@ package com.banco.transfer_service.transfer.service;
 
 import com.banco.transfer_service.client.AccountServiceClient;
 import com.banco.transfer_service.client.AccountServiceException;
+import com.banco.transfer_service.client.AccountServiceUnavailableException;
+import io.github.resilience4j.bulkhead.BulkheadFullException;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import com.banco.transfer_service.outbox.OutboxService;
 import com.banco.transfer_service.outbox.event.TransferCompensatedEvent;
 import com.banco.transfer_service.outbox.event.TransferCompletedEvent;
@@ -19,6 +22,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -46,19 +50,25 @@ public class TransferOrchestrator {
     private final TransactionTemplate transactionTemplate;
     private final ReentrantLock lock = new ReentrantLock();
     private final int batchSize;
+    private final Duration retryBackoff;
+    private final Duration circuitOpenBackoff;
 
     public TransferOrchestrator(
             TransferRepository repository,
             AccountServiceClient accountServiceClient,
             OutboxService outboxService,
             PlatformTransactionManager transactionManager,
-            @Value("${transfer.orchestrator.batch-size}") int batchSize
+            @Value("${transfer.orchestrator.batch-size}") int batchSize,
+            @Value("${transfer.orchestrator.retry-backoff}") Duration retryBackoff,
+            @Value("${transfer.orchestrator.circuit-open-backoff}") Duration circuitOpenBackoff
     ) {
         this.repository = repository;
         this.accountServiceClient = accountServiceClient;
         this.outboxService = outboxService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.batchSize = batchSize;
+        this.retryBackoff = retryBackoff;
+        this.circuitOpenBackoff = circuitOpenBackoff;
     }
 
     @Scheduled(fixedDelayString = "${transfer.orchestrator.poll-interval:500ms}")
@@ -68,7 +78,7 @@ public class TransferOrchestrator {
         }
         try {
             List<UUID> ids = repository.findProcessableIds(
-                    PROCESSABLE, PageRequest.of(0, batchSize)
+                    PROCESSABLE, Instant.now(), PageRequest.of(0, batchSize)
             );
             for (UUID id : ids) {
                 process(id);
@@ -94,11 +104,41 @@ public class TransferOrchestrator {
                 default -> {
                 }
             }
+        } catch (CallNotPermittedException ex) {
+            handleTransientFailure(data, circuitOpenBackoff, "account-service circuit is open");
+        } catch (BulkheadFullException ex) {
+            handleTransientFailure(data, retryBackoff, "account-service bulkhead is full");
+        } catch (AccountServiceUnavailableException ex) {
+            handleTransientFailure(data, retryBackoff, ex.getMessage());
         } catch (AccountServiceException ex) {
             handleAccountFailure(data, ex);
         } catch (Exception ex) {
             log.error("Unexpected error processing transfer {}", id, ex);
         }
+    }
+
+    private void handleTransientFailure(TransferData data, Duration delay, String reason) {
+        if (data.status() != TransferStatus.PENDING
+                && data.status() != TransferStatus.DEBITED
+                && data.status() != TransferStatus.COMPLETING
+                && data.status() != TransferStatus.COMPENSATING) {
+            return;
+        }
+
+        Instant nextAttempt = Instant.now().plus(delay);
+        log.warn(
+                "Transient failure processing transfer {}: {}, retrying at {}",
+                data.id(), reason, nextAttempt
+        );
+        applyRetry(data.id(), nextAttempt, reason);
+    }
+
+    private void applyRetry(UUID id, Instant nextAttempt, String reason) {
+        transactionTemplate.executeWithoutResult(status -> {
+            Transfer transfer = repository.findById(id).orElseThrow();
+            transfer.scheduleRetry(nextAttempt, reason);
+            repository.save(transfer);
+        });
     }
 
     private void debit(TransferData data) {

@@ -108,6 +108,8 @@ transfer:
     enabled: ${TRANSFER_ORCHESTRATOR_ENABLED:true}
     poll-interval: ${TRANSFER_ORCHESTRATOR_POLL_INTERVAL:500ms}
     batch-size: ${TRANSFER_ORCHESTRATOR_BATCH_SIZE:20}
+    retry-backoff: ${TRANSFER_ORCHESTRATOR_RETRY_BACKOFF:2s}
+    circuit-open-backoff: ${TRANSFER_ORCHESTRATOR_CIRCUIT_OPEN_BACKOFF:30s}
 
 management:
   endpoints:
