@@ -6,6 +6,8 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 @Component
 public class CircuitBreakerMetrics {
 
@@ -17,9 +19,20 @@ public class CircuitBreakerMetrics {
     ) {
         CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker(NAME);
 
-        Gauge.builder("transfers.circuit.state", circuitBreaker, breaker -> breaker.getState().ordinal())
-                .description("Estado del circuito: 0=CLOSED, 1=OPEN, 2=HALF_OPEN")
-                .register(meterRegistry);
+        for (CircuitBreaker.State state : List.of(
+                CircuitBreaker.State.CLOSED,
+                CircuitBreaker.State.OPEN,
+                CircuitBreaker.State.HALF_OPEN
+        )) {
+            Gauge.builder(
+                    "transfers.circuit.state",
+                    circuitBreaker,
+                    breaker -> breaker.getState() == state ? 1 : 0
+            )
+                    .tag("state", state.name())
+                    .description("Estado actual del circuito (1 para el estado activo)")
+                    .register(meterRegistry);
+        }
 
         circuitBreaker.getEventPublisher().onStateTransition(event -> meterRegistry
                 .counter(
