@@ -44,6 +44,8 @@ outbox:
   retry-backoff: ${OUTBOX_RETRY_BACKOFF:1s}
   metrics:
     refresh-interval: ${OUTBOX_METRICS_REFRESH_INTERVAL:5s}
+  health:
+    stale-threshold: ${OUTBOX_STALE_THRESHOLD:1m}
 
 management:
   endpoints:
