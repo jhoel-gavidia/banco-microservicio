@@ -16,13 +16,12 @@ public record AccountMovementEvent(
         BigDecimal balanceAfter,
         String reference,
         Instant occurredAt,
-        String eventType
+        String eventType,
+        String correlationId
 ) implements DomainEvent {
 
     @Override
     public UUID aggregateId() {
         return accountId;
     }
-
-
 }

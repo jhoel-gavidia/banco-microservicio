@@ -3,8 +3,10 @@ package com.banco.account_service.ledger.service;
 import com.banco.account_service.account.Account;
 import com.banco.account_service.account.exception.AccountNotFoundException;
 import com.banco.account_service.account.repository.AccountRepository;
+import com.banco.account_service.correlation.CorrelationContext;
 import com.banco.account_service.idempotency.IdempotencyService;
 import com.banco.account_service.idempotency.IdempotencyService.StoredResponse;
+import com.banco.account_service.metrics.AccountMetrics;
 import com.banco.account_service.outbox.OutboxService;
 import com.banco.account_service.outbox.event.AccountMovementEvent;
 import com.banco.account_service.ledger.LedgerEntry;
@@ -41,6 +43,7 @@ public class LedgerServiceImpl implements LedgerService {
     private final IdempotencyService idempotencyService;
     private final ObjectMapper objectMapper;
     private final OutboxService outboxService;
+    private final AccountMetrics metrics;
 
     @Override
     @Transactional
@@ -122,8 +125,10 @@ public class LedgerServiceImpl implements LedgerService {
                     balanceAfter,
                     reference,
                     saved.getCreatedAt(),
-                    "ACCOUNT_MOVEMENT_RECORDED"
+                    "ACCOUNT_MOVEMENT_RECORDED",
+                    CorrelationContext.getOrGenerate()
             ));
+            metrics.movement(type);
             response = ledgerEntryMapper.toResponse(saved);
         } catch (DataIntegrityViolationException ex) {
             throw new DuplicateReferenceException(accountId, reference, type);

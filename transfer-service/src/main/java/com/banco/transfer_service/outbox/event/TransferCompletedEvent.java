@@ -14,7 +14,8 @@ public record TransferCompletedEvent(
         UUID targetAccountId,
         BigDecimal amount,
         String currency,
-        Instant occurredAt
+        Instant occurredAt,
+        String correlationId
 ) implements DomainEvent {
 
     @Override

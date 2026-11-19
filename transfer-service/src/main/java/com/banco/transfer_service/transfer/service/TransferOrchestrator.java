@@ -2,6 +2,11 @@ package com.banco.transfer_service.transfer.service;
 
 import com.banco.transfer_service.client.AccountServiceClient;
 import com.banco.transfer_service.client.AccountServiceException;
+import com.banco.transfer_service.client.AccountServiceUnavailableException;
+import com.banco.transfer_service.correlation.CorrelationContext;
+import com.banco.transfer_service.metrics.TransferMetrics;
+import io.github.resilience4j.bulkhead.BulkheadFullException;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import com.banco.transfer_service.outbox.OutboxService;
 import com.banco.transfer_service.outbox.event.TransferCompensatedEvent;
 import com.banco.transfer_service.outbox.event.TransferCompletedEvent;
@@ -19,6 +24,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -44,21 +50,30 @@ public class TransferOrchestrator {
     private final AccountServiceClient accountServiceClient;
     private final OutboxService outboxService;
     private final TransactionTemplate transactionTemplate;
+    private final TransferMetrics metrics;
     private final ReentrantLock lock = new ReentrantLock();
     private final int batchSize;
+    private final Duration retryBackoff;
+    private final Duration circuitOpenBackoff;
 
     public TransferOrchestrator(
             TransferRepository repository,
             AccountServiceClient accountServiceClient,
             OutboxService outboxService,
             PlatformTransactionManager transactionManager,
-            @Value("${transfer.orchestrator.batch-size}") int batchSize
+            TransferMetrics metrics,
+            @Value("${transfer.orchestrator.batch-size}") int batchSize,
+            @Value("${transfer.orchestrator.retry-backoff}") Duration retryBackoff,
+            @Value("${transfer.orchestrator.circuit-open-backoff}") Duration circuitOpenBackoff
     ) {
         this.repository = repository;
         this.accountServiceClient = accountServiceClient;
         this.outboxService = outboxService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.metrics = metrics;
         this.batchSize = batchSize;
+        this.retryBackoff = retryBackoff;
+        this.circuitOpenBackoff = circuitOpenBackoff;
     }
 
     @Scheduled(fixedDelayString = "${transfer.orchestrator.poll-interval:500ms}")
@@ -68,7 +83,7 @@ public class TransferOrchestrator {
         }
         try {
             List<UUID> ids = repository.findProcessableIds(
-                    PROCESSABLE, PageRequest.of(0, batchSize)
+                    PROCESSABLE, Instant.now(), PageRequest.of(0, batchSize)
             );
             for (UUID id : ids) {
                 process(id);
@@ -86,19 +101,67 @@ public class TransferOrchestrator {
             return;
         }
 
-        try {
-            switch (data.status()) {
-                case PENDING -> debit(data);
-                case DEBITED, COMPLETING -> credit(data);
-                case COMPENSATING -> compensate(data);
-                default -> {
-                }
-            }
-        } catch (AccountServiceException ex) {
-            handleAccountFailure(data, ex);
-        } catch (Exception ex) {
-            log.error("Unexpected error processing transfer {}", id, ex);
+        if (data.correlationId() != null && !data.correlationId().isBlank()) {
+            CorrelationContext.set(data.correlationId());
         }
+
+        try {
+            try {
+                switch (data.status()) {
+                    case PENDING -> debit(data);
+                    case DEBITED, COMPLETING -> credit(data);
+                    case COMPENSATING -> compensate(data);
+                    default -> {
+                    }
+                }
+            } catch (CallNotPermittedException ex) {
+                handleTransientFailure(
+                        data, circuitOpenBackoff, "circuit_open", "account-service circuit is open"
+                );
+            } catch (BulkheadFullException ex) {
+                handleTransientFailure(
+                        data, retryBackoff, "bulkhead_full", "account-service bulkhead is full"
+                );
+            } catch (AccountServiceUnavailableException ex) {
+                handleTransientFailure(data, retryBackoff, "unavailable", ex.getMessage());
+            } catch (AccountServiceException ex) {
+                handleAccountFailure(data, ex);
+            } catch (Exception ex) {
+                log.error("Unexpected error processing transfer {}", id, ex);
+            }
+        } finally {
+            CorrelationContext.clear();
+        }
+    }
+
+    private void handleTransientFailure(
+            TransferData data,
+            Duration delay,
+            String kind,
+            String reason
+    ) {
+        if (data.status() != TransferStatus.PENDING
+                && data.status() != TransferStatus.DEBITED
+                && data.status() != TransferStatus.COMPLETING
+                && data.status() != TransferStatus.COMPENSATING) {
+            return;
+        }
+
+        Instant nextAttempt = Instant.now().plus(delay);
+        metrics.clientRetry(kind);
+        log.warn(
+                "Transient failure processing transfer {}: {}, retrying at {}",
+                data.id(), reason, nextAttempt
+        );
+        applyRetry(data.id(), nextAttempt, reason);
+    }
+
+    private void applyRetry(UUID id, Instant nextAttempt, String reason) {
+        transactionTemplate.executeWithoutResult(status -> {
+            Transfer transfer = repository.findById(id).orElseThrow();
+            transfer.scheduleRetry(nextAttempt, reason);
+            repository.save(transfer);
+        });
     }
 
     private void debit(TransferData data) {
@@ -158,7 +221,8 @@ public class TransferOrchestrator {
                     transfer.getSourceAccountId(),
                     transfer.getAmount().getAmount(),
                     transfer.getAmount().getCurrency(),
-                    Instant.now()
+                    Instant.now(),
+                    transfer.getCorrelationId()
             ));
             repository.save(transfer);
         });
@@ -179,9 +243,11 @@ public class TransferOrchestrator {
                     transfer.getTargetAccountId(),
                     transfer.getAmount().getAmount(),
                     transfer.getAmount().getCurrency(),
-                    Instant.now()
+                    Instant.now(),
+                    transfer.getCorrelationId()
             ));
             repository.save(transfer);
+            metrics.completed(transfer.getCreatedAt());
         });
     }
 
@@ -205,9 +271,11 @@ public class TransferOrchestrator {
                     transfer.getAmount().getAmount(),
                     transfer.getAmount().getCurrency(),
                     transfer.getFailureReason(),
-                    Instant.now()
+                    Instant.now(),
+                    transfer.getCorrelationId()
             ));
             repository.save(transfer);
+            metrics.compensated(transfer.getCreatedAt());
         });
     }
 
@@ -216,6 +284,7 @@ public class TransferOrchestrator {
             Transfer transfer = repository.findById(id).orElseThrow();
             transfer.markFailed(reason);
             repository.save(transfer);
+            metrics.failed(transfer.getCreatedAt());
         });
     }
 
@@ -235,7 +304,8 @@ public class TransferOrchestrator {
             UUID targetAccountId,
             Money amount,
             String reference,
-            TransferStatus status
+            TransferStatus status,
+            String correlationId
     ) {
         static TransferData from(Transfer transfer) {
             return new TransferData(
@@ -245,7 +315,8 @@ public class TransferOrchestrator {
                     transfer.getTargetAccountId(),
                     transfer.getAmount(),
                     transfer.getReference(),
-                    transfer.getStatus()
+                    transfer.getStatus(),
+                    transfer.getCorrelationId()
             );
         }
     }

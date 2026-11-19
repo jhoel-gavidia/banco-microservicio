@@ -14,7 +14,8 @@ public record TransferCompensatedEvent(
         BigDecimal amount,
         String currency,
         String reason,
-        Instant occurredAt
+        Instant occurredAt,
+        String correlationId
 ) implements DomainEvent {
 
     @Override

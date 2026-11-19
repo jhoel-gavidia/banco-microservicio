@@ -13,7 +13,8 @@ public record TransferDebitedEvent(
         UUID sourceAccountId,
         BigDecimal amount,
         String currency,
-        Instant occurredAt
+        Instant occurredAt,
+        String correlationId
 ) implements DomainEvent {
 
     @Override

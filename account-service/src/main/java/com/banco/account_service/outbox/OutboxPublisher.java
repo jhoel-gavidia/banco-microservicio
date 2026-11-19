@@ -26,6 +26,7 @@ public class OutboxPublisher {
 
     private final OutboxEventRepository repository;
     private final KafkaTemplate<String, String> kafkaTemplate;
+    private final OutboxMetrics metrics;
 
     @Value("${outbox.topic}")
     private String topic;
@@ -50,8 +51,10 @@ public class OutboxPublisher {
 
     private void publish(OutboxEvent event) {
         try {
+            Instant publishedAt = Instant.now();
             send(topic, event);
-            event.markPublished(Instant.now());
+            event.markPublished(publishedAt);
+            metrics.published(Duration.between(event.getOccurredAt(), publishedAt));
         } catch (Exception ex) {
             handleFailure(event, ex);
         }
@@ -70,6 +73,7 @@ public class OutboxPublisher {
             try {
                 send(topic + ".dlq", event);
                 event.markPublished(now);
+                metrics.deadLettered();
                 log.warn("Evento {} enviado a la cola de fallos tras {} intentos", event.getId(), attempted, ex);
             } catch (Exception dlqError) {
                 event.markFailed(now.plus(retryBackoff.multipliedBy(attempted)));

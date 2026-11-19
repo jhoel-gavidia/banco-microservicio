@@ -15,7 +15,8 @@ public record TransferInitiatedEvent(
         BigDecimal amount,
         String currency,
         String reference,
-        Instant occurredAt
+        Instant occurredAt,
+        String correlationId
 ) implements DomainEvent {
 
     @Override

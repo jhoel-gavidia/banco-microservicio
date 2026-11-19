@@ -6,6 +6,7 @@ import com.banco.account_service.account.exception.AccountAlreadyExistsException
 import com.banco.account_service.account.exception.AccountNotFoundException;
 import com.banco.account_service.account.mapper.AccountMapper;
 import com.banco.account_service.account.repository.AccountRepository;
+import com.banco.account_service.correlation.CorrelationContext;
 import com.banco.account_service.outbox.OutboxService;
 import com.banco.account_service.outbox.event.AccountOpenedEvent;
 import com.banco.account_service.security.CustomerContext;
@@ -47,7 +48,8 @@ public class AccountServiceImpl implements AccountService {
                     savedAccount.getNumber(),
                     savedAccount.getCurrency(),
                     savedAccount.getCreatedAt(),
-                    "ACCOUNT_OPENED"
+                    "ACCOUNT_OPENED",
+                    CorrelationContext.getOrGenerate()
             ));
             return accountMapper.toResponse(savedAccount);
         } catch (DataIntegrityViolationException ex) {

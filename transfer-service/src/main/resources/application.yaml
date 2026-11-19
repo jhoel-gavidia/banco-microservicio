@@ -55,21 +55,78 @@ outbox:
   poll-interval: ${OUTBOX_POLL_INTERVAL:500ms}
   max-attempts: ${OUTBOX_MAX_ATTEMPTS:5}
   retry-backoff: ${OUTBOX_RETRY_BACKOFF:1s}
+  metrics:
+    refresh-interval: ${OUTBOX_METRICS_REFRESH_INTERVAL:5s}
+  health:
+    stale-threshold: ${OUTBOX_STALE_THRESHOLD:1m}
 
 account-service:
   base-url: ${ACCOUNT_SERVICE_BASE_URL:http://localhost:8081}
+  connect-timeout: ${ACCOUNT_SERVICE_CONNECT_TIMEOUT:1s}
+  read-timeout: ${ACCOUNT_SERVICE_READ_TIMEOUT:2s}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      accountService:
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 20
+        minimumNumberOfCalls: 20
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+        recordExceptions:
+          - com.banco.transfer_service.client.AccountServiceUnavailableException
+          - java.util.concurrent.TimeoutException
+        ignoreExceptions:
+          - com.banco.transfer_service.client.AccountServiceException
+          - io.github.resilience4j.bulkhead.BulkheadFullException
+  retry:
+    instances:
+      accountService:
+        maxAttempts: 3
+        waitDuration: 100ms
+        enableExponentialBackoff: true
+        exponentialBackoffMultiplier: 2
+        enableRandomizedWait: true
+        randomizedWaitFactor: 0.5
+        retryExceptions:
+          - com.banco.transfer_service.client.AccountServiceUnavailableException
+        ignoreExceptions:
+          - com.banco.transfer_service.client.AccountServiceException
+          - io.github.resilience4j.bulkhead.BulkheadFullException
+  timelimiter:
+    instances:
+      accountService:
+        timeoutDuration: 3s
+        cancelRunningFuture: true
+  thread-pool-bulkhead:
+    instances:
+      accountService:
+        coreThreadPoolSize: 5
+        maxThreadPoolSize: 10
+        queueCapacity: 20
 
 transfer:
   orchestrator:
     enabled: ${TRANSFER_ORCHESTRATOR_ENABLED:true}
     poll-interval: ${TRANSFER_ORCHESTRATOR_POLL_INTERVAL:500ms}
     batch-size: ${TRANSFER_ORCHESTRATOR_BATCH_SIZE:20}
+    retry-backoff: ${TRANSFER_ORCHESTRATOR_RETRY_BACKOFF:2s}
+    circuit-open-backoff: ${TRANSFER_ORCHESTRATOR_CIRCUIT_OPEN_BACKOFF:30s}
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: when-authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{correlationId:-}]"

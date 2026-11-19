@@ -42,12 +42,23 @@ outbox:
   poll-interval: ${OUTBOX_POLL_INTERVAL:500ms}
   max-attempts: ${OUTBOX_MAX_ATTEMPTS:5}
   retry-backoff: ${OUTBOX_RETRY_BACKOFF:1s}
+  metrics:
+    refresh-interval: ${OUTBOX_METRICS_REFRESH_INTERVAL:5s}
+  health:
+    stale-threshold: ${OUTBOX_STALE_THRESHOLD:1m}
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: when-authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{correlationId:-}]"

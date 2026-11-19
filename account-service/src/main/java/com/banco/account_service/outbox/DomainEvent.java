@@ -12,4 +12,6 @@ public interface DomainEvent {
     String eventType();
 
     Instant occurredAt();
+
+    String correlationId();
 }

@@ -27,16 +27,16 @@ Endpoints:
 - `POST /api/v1/accounts/{id}/deposits` → 201. Body: `amount`, `reference`. Solo `admin` o el service account de `transfer-service` con `account_internal`.
 - `POST /api/v1/accounts/{id}/withdrawals` → 201. Body: `amount`, `reference`.
 - `GET /api/v1/accounts/{id}/movements` → 200 con el historial.
-- `GET /actuator/health`.
+- `GET /actuator/health`, `GET /actuator/metrics`, `GET /actuator/prometheus`.
 
-Solo las cuentas `ACTIVE` pueden mover saldo.
+Solo las cuentas `ACTIVE` pueden mover saldo. Un depósito o retiro sobre `BLOCKED` o `CLOSED` responde 409 con `type` `https://banco.local/problems/account-not-active`, sin cambiar el saldo ni dejar una clave de idempotencia pendiente.
 
 ### transfer-service
 
 - `POST /api/v1/transfers` → 201. Body: `sourceAccountId`, `targetAccountId`, `amount`, `currency`, `reference`. Exige el header `Idempotency-Key`.
 - `GET /api/v1/transfers/{id}` → 200 o 404.
 - `GET /api/v1/transfers` → 200 con las transferencias del propietario, o todas si es `admin`.
-- `GET /actuator/health`. Un depósito o retiro sobre `BLOCKED` o `CLOSED` responde 409 con `type` `https://banco.local/problems/account-not-active`, sin cambiar el saldo ni dejar una clave de idempotencia pendiente.
+- `GET /actuator/health`, `GET /actuator/metrics`, `GET /actuator/prometheus`.
 
 `reference` la elige el cliente y es obligatoria. Se guarda en el asiento y `UNIQUE (account_id, reference, type)` evita que el mismo movimiento se registre dos veces; repetirla devuelve 409. Retirar más de lo disponible devuelve 422.
 
@@ -110,15 +110,15 @@ Los 401 y 403 se escriben en `application/problem+json` desde `AuthenticationEnt
 
 Un worker revisa periódicamente las transferencias pendientes. La saga hace el débito en la cuenta de origen, el depósito en la de destino y, si el depósito falla, devuelve el importe con un depósito de compensación en la cuenta de origen. Las llamadas usan claves estables `transfer-{id}-debit`, `transfer-{id}-credit` y `transfer-{id}-refund`, así que reintentar después de un corte no duplica cargos. Los estados son `PENDING`, `DEBITED`, `COMPLETING`, `COMPENSATING`, `COMPLETED`, `COMPENSATED` y `FAILED`. Las consultas muestran solo las transferencias propias; `admin` ve todas.
 
-Configuración por entorno: `ACCOUNT_SERVICE_BASE_URL`, `TRANSFER_ORCHESTRATOR_ENABLED`, `TRANSFER_ORCHESTRATOR_POLL_INTERVAL` y `TRANSFER_ORCHESTRATOR_BATCH_SIZE`.
+Configuración por entorno: `ACCOUNT_SERVICE_BASE_URL`, `ACCOUNT_SERVICE_CONNECT_TIMEOUT`, `ACCOUNT_SERVICE_READ_TIMEOUT`, `TRANSFER_ORCHESTRATOR_ENABLED`, `TRANSFER_ORCHESTRATOR_POLL_INTERVAL`, `TRANSFER_ORCHESTRATOR_BATCH_SIZE`, `TRANSFER_ORCHESTRATOR_RETRY_BACKOFF` y `TRANSFER_ORCHESTRATOR_CIRCUIT_OPEN_BACKOFF`.
 
 ## Eventos
 
 Cada servicio publica en su propio tópico. `account-service` usa `account.movements.v1` con clave de partición `accountId`, así que los eventos de una misma cuenta caen siempre en la misma partición y conservan su orden. Hay dos tipos:
 
 ```json
-{"eventId":"...","eventType":"ACCOUNT_OPENED","accountId":"...","customerId":"...","number":"...","currency":"EUR","occurredAt":"..."}
-{"eventId":"...","eventType":"ACCOUNT_MOVEMENT_RECORDED","accountId":"...","customerId":"...","type":"CREDIT","amount":25.50,"balanceAfter":25.5000,"reference":"...","occurredAt":"..."}
+{"eventId":"...","eventType":"ACCOUNT_OPENED","accountId":"...","customerId":"...","number":"...","currency":"EUR","occurredAt":"...","correlationId":"..."}
+{"eventId":"...","eventType":"ACCOUNT_MOVEMENT_RECORDED","accountId":"...","customerId":"...","type":"CREDIT","amount":25.50,"balanceAfter":25.5000,"reference":"...","occurredAt":"...","correlationId":"..."}
 ```
 
 `eventType` va en el payload y también en la columna `event_type` del outbox. Cada `eventId` es único y es la clave de deduplicación del consumidor: la entrega es `at-least-once`, así que un mismo evento puede llegar dos veces. Guarda los `eventId` procesados y descarta los repetidos antes de aplicar el efecto.
@@ -133,9 +133,26 @@ docker exec banco-kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-ser
 docker exec banco-kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic transfer.events.v1 --from-beginning --property print.key=true
 ```
 
-`transfer-service` usa `transfer.events.v1` con clave `transferId`. Emite `TransferInitiated`, `TransferDebited`, `TransferCompleted` y `TransferCompensated`; todos llevan `transferId`, `customerId`, importe y moneda, y el de compensación incluye el motivo. La lógica de outbox, idempotencia y deduplicación está duplicada en cada servicio a propósito: ninguno depende del código del otro.
+`transfer-service` usa `transfer.events.v1` con clave `transferId`. Emite `TransferInitiated`, `TransferDebited`, `TransferCompleted` y `TransferCompensated`; todos llevan `transferId`, `customerId`, `correlationId`, importe y moneda, y el de compensación incluye el motivo. La lógica de outbox, idempotencia y deduplicación está duplicada en cada servicio a propósito: ninguno depende del código del otro.
 
-Configuración por entorno: `KAFKA_BOOTSTRAP_SERVERS`, `OUTBOX_TOPIC`, `OUTBOX_PUBLISHER_ENABLED`, `OUTBOX_BATCH_SIZE`, `OUTBOX_POLL_INTERVAL`, `OUTBOX_MAX_ATTEMPTS` y `OUTBOX_RETRY_BACKOFF`. El productor usa `acks=all` e idempotencia; `max.block.ms` y `delivery.timeout.ms` están acotados para que una caída del broker no deje al publicador esperando un minuto por evento.
+Configuración por entorno: `KAFKA_BOOTSTRAP_SERVERS`, `OUTBOX_TOPIC`, `OUTBOX_PUBLISHER_ENABLED`, `OUTBOX_BATCH_SIZE`, `OUTBOX_POLL_INTERVAL`, `OUTBOX_MAX_ATTEMPTS`, `OUTBOX_RETRY_BACKOFF`, `OUTBOX_METRICS_REFRESH_INTERVAL` y `OUTBOX_STALE_THRESHOLD`. El productor usa `acks=all` e idempotencia; `max.block.ms` y `delivery.timeout.ms` están acotados para que una caída del broker no deje al publicador esperando un minuto por evento.
+
+## Resiliencia y observabilidad
+
+`transfer-service` llama a `account-service` con `connect-timeout=1s` y `read-timeout=2s`, y envuelve cada llamada en circuit breaker → retry → time limiter → bulkhead, en ese orden. El circuito se abre al 50% de fallos sobre 20 llamadas, espera 30 s y permite 3 llamadas de prueba en half-open. El retry hace 3 intentos totales con backoff exponencial y jitter; no reintenta si el circuito está abierto ni si el bulkhead está lleno. El bulkhead reserva 5 hilos, llega a 10 y admite 20 esperando en cola. El time limiter cancela la llamada a los 3 s.
+
+Un fallo transitorio no marca la transferencia como fallida: queda en `PENDING` con `failure_reason` y `next_attempt_at`, y el worker la reanuda cuando pasa el espaciado. Los fallos de negocio sí avanzan la saga a `FAILED` o inician la compensación. El espaciado del worker se ajusta con `TRANSFER_ORCHESTRATOR_RETRY_BACKOFF` y `TRANSFER_ORCHESTRATOR_CIRCUIT_OPEN_BACKOFF`.
+
+La correlación viaja en `X-Correlation-Id`. Si el cliente no la envía, el servicio la genera; se guarda en el MDC, se devuelve en la respuesta, aparece en los `ProblemDetail` y se incluye en los eventos del outbox. La saga persiste el valor en `transfers.correlation_id` y lo restaura al reanudarse, incluso cuando el bulkhead cambia de hilo. Así se puede seguir una misma operación en logs y en Kafka de extremo a extremo sin depender de un tracing distribuido.
+
+Los endpoints `/actuator/health`, `/actuator/metrics` y `/actuator/prometheus` piden Bearer token en ambos servicios. Además de las métricas de Resilience4j (`resilience4j_*`), hay métricas de dominio:
+
+- `transfers.created`, `transfers.saga.completed`, `transfers.saga.compensated`, `transfers.saga.failed` y `transfers.saga.duration`.
+- `transfers.client.retries` por motivo (`circuit_open`, `bulkhead_full`, `unavailable`), `transfers.circuit.state` con etiqueta `state` y `transfers.circuit.transitions` con `from`/`to`.
+- `outbox.events.published`, `outbox.events.dlq`, `outbox.events.pending`, `outbox.events.oldest.age.seconds` y `outbox.publish.lag`.
+- `account.movements.recorded` con etiqueta `type` (`CREDIT` o `DEBIT`).
+
+`GET /actuator/health` incluye el componente `outbox`. Si el evento pendiente más antiguo supera `OUTBOX_STALE_THRESHOLD` (1 minuto por defecto), el estado general pasa a `DOWN` y el detalle muestra `pending`, `oldestPendingAgeSeconds` y `staleThresholdSeconds`. Esto detecta que el publicador dejó de publicar, no solo que la base de datos responda.
 
 ## Tests
 
