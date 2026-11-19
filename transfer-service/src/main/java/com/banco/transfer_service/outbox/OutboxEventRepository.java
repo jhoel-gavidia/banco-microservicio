@@ -19,4 +19,10 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, UUID> 
             FOR UPDATE SKIP LOCKED
             """, nativeQuery = true)
     List<OutboxEvent> findPending(@Param("now") Instant now, @Param("limit") int limit);
+
+    @Query("SELECT COUNT(e) FROM OutboxEvent e WHERE e.publishedAt IS NULL")
+    long countPending();
+
+    @Query("SELECT MIN(e.createdAt) FROM OutboxEvent e WHERE e.publishedAt IS NULL")
+    Instant findOldestPendingCreatedAt();
 }

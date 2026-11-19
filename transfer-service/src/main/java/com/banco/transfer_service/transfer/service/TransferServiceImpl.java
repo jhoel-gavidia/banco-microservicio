@@ -4,6 +4,7 @@ import com.banco.transfer_service.client.AccountServiceClient;
 import com.banco.transfer_service.correlation.CorrelationContext;
 import com.banco.transfer_service.idempotency.IdempotencyService;
 import com.banco.transfer_service.idempotency.IdempotencyService.StoredResponse;
+import com.banco.transfer_service.metrics.TransferMetrics;
 import com.banco.transfer_service.outbox.OutboxService;
 import com.banco.transfer_service.outbox.event.TransferInitiatedEvent;
 import com.banco.transfer_service.security.CustomerContext;
@@ -40,6 +41,7 @@ public class TransferServiceImpl implements TransferService {
     private final AccountServiceClient accountServiceClient;
     private final OutboxService outboxService;
     private final ObjectMapper objectMapper;
+    private final TransferMetrics metrics;
 
     @Override
     @Transactional
@@ -95,6 +97,7 @@ public class TransferServiceImpl implements TransferService {
                 customer.customerId(), idempotencyKey, 201, serialize(response)
         );
 
+        metrics.created();
         return response;
     }
 
