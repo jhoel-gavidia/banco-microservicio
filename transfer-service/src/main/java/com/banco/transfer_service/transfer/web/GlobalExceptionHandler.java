@@ -1,6 +1,9 @@
 package com.banco.transfer_service.transfer.web;
 
 import com.banco.transfer_service.client.AccountServiceException;
+import com.banco.transfer_service.client.AccountServiceUnavailableException;
+import io.github.resilience4j.bulkhead.BulkheadFullException;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import com.banco.transfer_service.idempotency.exception.IdempotencyKeyInProgressException;
 import com.banco.transfer_service.idempotency.exception.IdempotencyKeyReusedException;
 import com.banco.transfer_service.security.SecurityProblems;
@@ -124,6 +127,41 @@ public class GlobalExceptionHandler {
         problem.setProperty("accountId", ex.getAccountId());
 
         return ResponseEntity.status(status).body(problem);
+    }
+
+    @ExceptionHandler(AccountServiceUnavailableException.class)
+    public ResponseEntity<ProblemDetail> handleAccountServiceUnavailable(
+            AccountServiceUnavailableException ex
+    ) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage()
+        );
+        problem.setType(URI.create("https://banco.local/problems/account-service-unavailable"));
+        problem.setTitle("Account service unavailable");
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem);
+    }
+
+    @ExceptionHandler(CallNotPermittedException.class)
+    public ResponseEntity<ProblemDetail> handleCircuitOpen(CallNotPermittedException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.SERVICE_UNAVAILABLE, "account-service circuit breaker is open"
+        );
+        problem.setType(URI.create("https://banco.local/problems/account-service-circuit-open"));
+        problem.setTitle("Account service circuit open");
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem);
+    }
+
+    @ExceptionHandler(BulkheadFullException.class)
+    public ResponseEntity<ProblemDetail> handleBulkheadFull(BulkheadFullException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.SERVICE_UNAVAILABLE, "account-service has no capacity available"
+        );
+        problem.setType(URI.create("https://banco.local/problems/account-service-bulkhead-full"));
+        problem.setTitle("Account service bulkhead full");
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem);
     }
 
     @ExceptionHandler(AccessDeniedException.class)

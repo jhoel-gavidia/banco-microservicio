@@ -3,6 +3,7 @@ package com.banco.transfer_service.client;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.security.oauth2.client.AuthorizedClientServiceOAuth2AuthorizedClientManager;
 import org.springframework.security.oauth2.client.OAuth2AuthorizeRequest;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
@@ -11,6 +12,8 @@ import org.springframework.security.oauth2.client.OAuth2AuthorizedClientProvider
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.web.client.RestClient;
+
+import java.time.Duration;
 
 @Configuration
 public class AccountServiceClientConfig {
@@ -38,10 +41,17 @@ public class AccountServiceClientConfig {
     @Bean
     RestClient accountServiceRestClient(
             OAuth2AuthorizedClientManager accountAuthorizedClientManager,
-            @Value("${account-service.base-url}") String baseUrl
+            @Value("${account-service.base-url}") String baseUrl,
+            @Value("${account-service.connect-timeout}") Duration connectTimeout,
+            @Value("${account-service.read-timeout}") Duration readTimeout
     ) {
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(connectTimeout);
+        requestFactory.setReadTimeout(readTimeout);
+
         return RestClient.builder()
                 .baseUrl(baseUrl)
+                .requestFactory(requestFactory)
                 .requestInterceptor((request, body, execution) -> {
                     OAuth2AuthorizedClient authorized = accountAuthorizedClientManager.authorize(
                             OAuth2AuthorizeRequest
