@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.ErrorResponse;
 
 import java.net.URI;
 
@@ -33,8 +33,8 @@ public class GatewayProblemHandler implements ErrorController {
             Exception exception,
             HttpServletRequest request
     ) {
-        int status = exception instanceof ResponseStatusException responseStatusException
-                ? responseStatusException.getStatusCode().value()
+        int status = exception instanceof ErrorResponse errorResponse
+                ? errorResponse.getStatusCode().value()
                 : 500;
         ProblemDetail problem = problemFor(status);
         problem.setInstance(URI.create(request.getRequestURI()));
