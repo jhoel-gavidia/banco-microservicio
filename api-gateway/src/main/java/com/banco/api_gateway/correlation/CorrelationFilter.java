@@ -35,6 +35,7 @@ public class CorrelationFilter extends OncePerRequestFilter {
         }
 
         CorrelationContext.set(correlationId);
+        request.setAttribute(CorrelationContext.HEADER, correlationId);
         response.setHeader(CorrelationContext.HEADER, correlationId);
 
         HttpServletRequest wrapped = new CorrelationRequestWrapper(request, correlationId);
