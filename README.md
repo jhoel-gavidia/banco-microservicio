@@ -1,6 +1,6 @@
 # banco-microservicio
 
-Dos servicios Spring Boot 4.1 sobre PostgreSQL 18, Kafka y Keycloak. `account-service` gestiona cuentas y movimientos; `transfer-service` coordina transferencias entre cuentas. Cada uno tiene su propia base de datos, su JAR y su configuración de seguridad, y comparten el compose, el realm y este README.
+Dos servicios Spring Boot 4.1 sobre PostgreSQL 18, Kafka y Keycloak, y un `api-gateway` con Spring Cloud Gateway WebMVC. `account-service` gestiona cuentas y movimientos; `transfer-service` coordina transferencias entre cuentas; el gateway expone un único punto de entrada. Cada servicio tiene su propia base de datos, su JAR y su configuración de seguridad, y comparten el compose, el realm y este README.
 
 ## Arrancarlo
 
@@ -14,9 +14,13 @@ cd account-service
 # terminal 2
 cd transfer-service
 .\mvnw.cmd spring-boot:run
+
+# terminal 3
+cd api-gateway
+.\mvnw.cmd spring-boot:run
 ```
 
-El compose levanta PostgreSQL en localhost:5432, Keycloak en localhost:8080 y Kafka en localhost:9092. `account-service` queda en http://localhost:8081 y `transfer-service` en http://localhost:8083. Cada servicio usa su propia BD (`accounts_db` y `transfers_db`) y su propio usuario con permisos solo sobre esa BD; en producción serían instancias distintas.
+El compose levanta PostgreSQL en localhost:5432, Keycloak en localhost:8080 y Kafka en localhost:9092. `account-service` queda en http://localhost:8081, `transfer-service` en http://localhost:8083 y `api-gateway` en http://localhost:8084. Cada servicio usa su propia BD (`accounts_db` y `transfers_db`) y su propio usuario con permisos solo sobre esa BD; en producción serían instancias distintas.
 
 ### account-service
 
@@ -48,7 +52,7 @@ Los errores vienen en RFC 7807. Fíjate en `type`: es un identificador estable, 
 
 ## Seguridad
 
-El compose levanta también Keycloak en `http://localhost:8080`. El realm `banco` se importa desde `keycloak/realm-banco.json`. Los clientes `account-service` y `transfer-service` tienen Direct Access Grants habilitado solo para desarrollo local. Ambos son resource servers: validan el JWT, no manejan sesiones ni contraseñas propias.
+El compose levanta también Keycloak en `http://localhost:8080`. El realm `banco` se importa desde `keycloak/realm-banco.json`. Los clientes `account-service` y `transfer-service` tienen Direct Access Grants habilitado solo para desarrollo local. Los tres componentes son resource servers: validan el JWT, no manejan sesiones ni contraseñas propias.
 
 Para pedir un token y llamar a `account-service`:
 
@@ -103,6 +107,27 @@ Dos detalles que valen la pena saber:
 - El `JwtDecoder` se arma con `NimbusJwtDecoder.withJwkSetUri(...)` dentro del bean, en lugar de usar `issuer-uri` directamente, para no descargar el JWKS al arrancar el contexto de los tests. La validación del issuer se añade aparte con `JwtValidators.createDefaultWithIssuer(...)`.
 
 Los 401 y 403 se escriben en `application/problem+json` desde `AuthenticationEntryPoint` y `AccessDeniedHandler`, porque los rechaza la cadena de filtros antes de llegar al controller. El `@RestControllerAdvice` cubre las mismas excepciones si algún día se lanzan dentro de él, reutilizando los mismos `type`.
+
+## api-gateway
+
+Punto de entrada único en http://localhost:8084. Es un módulo independiente con Spring Cloud Gateway WebMVC: las rutas son estáticas y viven en `spring.cloud.gateway.server.webmvc.routes` de `api-gateway/src/main/resources/application.yaml`. No hay descubrimiento de servicios ni variante reactiva.
+
+| ruta | destino |
+| --- | --- |
+| `/api/v1/accounts`, `/api/v1/accounts/**` | `http://localhost:8081` |
+| `/api/v1/transfers`, `/api/v1/transfers/**` | `http://localhost:8083` |
+
+El gateway valida el Bearer token contra el mismo realm antes de rutear, con el mismo mapeo de `realm_access.roles` a `ROLE_*` y de `scope` a `SCOPE_*`. Los servicios siguen validando por su cuenta: si alguien los llama directamente, no baja el nivel de seguridad. No se creó un cliente nuevo en Keycloak; sirven los tokens de `account-service` y `transfer-service` descritos arriba.
+
+Las reglas de acceso son: lectura de cuentas con `account_read`, `admin` o `account_internal`; depósitos solo con `admin` o `account_internal`; el resto de escrituras de cuentas con `account_write`, `admin` o `account_internal`; y transferencias con scope y rol a la vez (`transfer.read` con `transfer_read`, `transfer.write` con `transfer_write`). Los 401 y 403 salen en `application/problem+json` con `correlationId`, usando los mismos `type` de los servicios.
+
+No hay reintentos automáticos en los POST: un 500 del servicio destino se devuelve tal cual al cliente. El retry de la saga `transfer-service` → `account-service` sigue viviendo en `transfer-service`, con sus claves de idempotencia; el gateway no duplica esa lógica.
+
+Si el cliente envía `X-Correlation-Id`, se respeta y se propaga; si no, se genera uno. Se guarda en el MDC, se devuelve en la respuesta, se añade a los `ProblemDetail` y viaja al servicio destino en la misma cabecera, incluso cuando el error ocurre durante el ruteo. Además de los tipos de autenticación y autorización, el gateway usa `https://banco.local/problems/invalid-argument`, `not-found`, `upstream-error` e `internal-error`.
+
+`/actuator/health`, `/actuator/health/**` y `/actuator/info` son públicos. `/actuator/metrics` y `/actuator/prometheus` piden token. Al ser WebMVC no existe `/actuator/gateway`; para ver los mappings disponibles usa `/actuator/mappings`.
+
+Configuración por entorno: `KEYCLOAK_ISSUER_URI`, `ACCOUNT_SERVICE_URL` y `TRANSFER_SERVICE_URL`.
 
 ## Transferencias
 
@@ -168,6 +193,8 @@ Los endpoints `/actuator/health`, `/actuator/metrics` y `/actuator/prometheus` p
 # uno solo:
 .\mvnw.cmd test "-Dtest=AccountRepositoryIT"
 ```
+
+En `api-gateway/` basta `.\mvnw.cmd test`: 15 tests sin Docker. El ruteo se comprueba contra un `HttpServer` embebido, así que no hace falta arrancar los servicios ni Keycloak.
 
 Con `mvn test` a secas Surefire corre las clases `*Test` y `*Tests`: entran `AccountServiceImplTest` y `AccountServiceApplicationTests`. Ojo que esta última ya usa Testcontainers, así que **necesita Docker aunque no se llame `*IT`**. Los `*IT` no los corre por defecto; hay que pedirlos con `-Dtest=...`. Cuando se monte CI se añadirá Failsafe para que `mvn verify` los corra solos.
 
