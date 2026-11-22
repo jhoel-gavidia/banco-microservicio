@@ -31,6 +31,11 @@ spring:
         request.timeout.ms: 4000
         delivery.timeout.ms: 5000
 
+  servlet:
+    multipart:
+      max-file-size: ${RECEIPT_MAX_FILE_SIZE:5MB}
+      max-request-size: ${RECEIPT_MAX_REQUEST_SIZE:6MB}
+
   security:
     oauth2:
       resourceserver:
@@ -114,6 +119,34 @@ transfer:
     batch-size: ${TRANSFER_ORCHESTRATOR_BATCH_SIZE:20}
     retry-backoff: ${TRANSFER_ORCHESTRATOR_RETRY_BACKOFF:2s}
     circuit-open-backoff: ${TRANSFER_ORCHESTRATOR_CIRCUIT_OPEN_BACKOFF:30s}
+  receipts:
+    s3:
+      bucket: ${RECEIPT_S3_BUCKET:banco-comprobantes-local}
+      region: ${AWS_REGION:us-east-1}
+      endpoint: ${RECEIPT_S3_ENDPOINT:}
+      access-key: ${AWS_ACCESS_KEY_ID:}
+      secret-key: ${AWS_SECRET_ACCESS_KEY:}
+      path-style-access-enabled: true
+      checksum-validation-enabled: true
+      checksum-mode: ${RECEIPT_S3_CHECKSUM_MODE:ENABLED}
+      api-call-timeout: ${RECEIPT_S3_API_CALL_TIMEOUT:10s}
+      api-call-attempt-timeout: ${RECEIPT_S3_API_CALL_ATTEMPT_TIMEOUT:3s}
+    upload:
+      max-file-size: ${RECEIPT_MAX_FILE_SIZE:5MB}
+      max-attempts: ${RECEIPT_MAX_ATTEMPTS:3}
+      lease-duration: ${RECEIPT_LEASE_DURATION:2m}
+      heartbeat-interval: ${RECEIPT_HEARTBEAT_INTERVAL:30s}
+      retry-backoff: ${RECEIPT_RETRY_BACKOFF:5s}
+      missing-grace: ${RECEIPT_MISSING_GRACE:2m}
+    download:
+      max-concurrent: ${RECEIPT_DOWNLOAD_MAX_CONCURRENT:4}
+      temp-dir: ${RECEIPT_TEMP_DIR:${java.io.tmpdir}}
+      socket-read-timeout: ${RECEIPT_DOWNLOAD_SOCKET_READ_TIMEOUT:3s}
+      response-first-read-timeout: ${RECEIPT_DOWNLOAD_FIRST_READ_TIMEOUT:10s}
+      total-soft-deadline: ${RECEIPT_DOWNLOAD_TOTAL_SOFT_DEADLINE:30s}
+      stream-buffer-size: ${RECEIPT_DOWNLOAD_BUFFER_SIZE:8KB}
+      temp-ttl: ${RECEIPT_TEMP_TTL:1h}
+      allow-unverified-temp-acl: ${RECEIPT_ALLOW_UNVERIFIED_TEMP_ACL:false}
 
 management:
   endpoints:
