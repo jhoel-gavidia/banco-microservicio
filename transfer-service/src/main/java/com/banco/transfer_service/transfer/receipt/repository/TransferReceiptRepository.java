@@ -72,12 +72,15 @@ public interface TransferReceiptRepository extends JpaRepository<TransferReceipt
             WHERE id = :id
               AND status = 'PENDING'
               AND lease_owner = :workerId
+              AND lease_expires_at > now()
             """, nativeQuery = true)
     int markActive(
             @Param("id") UUID id,
             @Param("workerId") UUID workerId,
             @Param("storageVersionId") String storageVersionId
     );
+
+
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
@@ -92,6 +95,7 @@ public interface TransferReceiptRepository extends JpaRepository<TransferReceipt
             WHERE id = :id
               AND status = 'PENDING'
               AND lease_owner = :workerId
+              AND lease_expires_at > now()
             """, nativeQuery = true)
     int markFailed(
             @Param("id") UUID id,
@@ -111,6 +115,7 @@ public interface TransferReceiptRepository extends JpaRepository<TransferReceipt
             WHERE id = :id
               AND status = 'PENDING'
               AND lease_owner = :workerId
+              AND lease_expires_at > now()
             """, nativeQuery = true)
     int reschedule(
             @Param("id") UUID id,
@@ -146,6 +151,7 @@ public interface TransferReceiptRepository extends JpaRepository<TransferReceipt
             WHERE id = :id
               AND status = 'PENDING'
               AND lease_owner = :workerId
+              AND lease_expires_at > now()
             """, nativeQuery = true)
     int releaseAmbiguousLease(
             @Param("id") UUID id,

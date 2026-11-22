@@ -15,20 +15,21 @@ import com.banco.transfer_service.transfer.service.TransferService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.exception.ApiCallAttemptTimeoutException;
 import software.amazon.awssdk.core.exception.ApiCallTimeoutException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.ChecksumAlgorithm;
+import software.amazon.awssdk.services.s3.model.ChecksumMode;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.UUID;
@@ -47,8 +48,8 @@ public class ReceiptUploadService {
     private final ReceiptS3Properties properties;
     private final S3Client s3Client;
     private final ReceiptLeaseHeartbeat leaseHeartbeat;
+    private final TransactionTemplate transactionTemplate;
 
-    @Transactional
     public ReceiptResponse upload(UUID transferId, MultipartFile file, CustomerContext customer) {
         TransferResponse transfer = transferService.getById(transferId, customer);
         ReceiptFileValidator.ValidatedReceiptFile validated = fileValidator.validate(
@@ -57,69 +58,118 @@ public class ReceiptUploadService {
 
         UUID receiptId = UUID.randomUUID();
         UUID leaseOwner = UUID.randomUUID();
-        Instant leaseExpiresAt = Instant.now().plus(properties.getUpload().getLeaseDuration());
         String objectKey = objectKey(transfer.id(), receiptId, validated.originalFilename());
 
-        TransferReceipt receipt = TransferReceipt.pending(
-                receiptId,
-                transfer.id(),
-                transfer.customerId(),
-                validated.sha256Hex(),
-                objectKey,
-                validated.contentType(),
-                validated.originalFilename(),
-                validated.sizeBytes(),
-                properties.getS3().getBucket(),
-                leaseOwner,
-                leaseExpiresAt
-        );
-        receiptRepository.saveAndFlush(receipt);
+        TransferReceipt receipt = createPending(receiptId, transfer, validated, objectKey, leaseOwner);
 
         ScheduledFuture<?> heartbeat = leaseHeartbeat.start(receiptId, leaseOwner);
-        UploadResult result;
         try {
-            result = putObject(receipt, file, validated);
+            UploadResult result = putObject(receipt, file, validated);
+            return finalizeUpload(receipt, leaseOwner, result, transfer.id());
         } finally {
             leaseHeartbeat.stop(heartbeat);
         }
+    }
 
+    private ReceiptResponse finalizeUpload(TransferReceipt receipt, UUID leaseOwner, UploadResult result, UUID transferId) {
         if (result instanceof UploadResult.Success success) {
-            receipt.markActive(success.versionId(), Instant.now());
-            receiptRepository.saveAndFlush(receipt);
-            return toResponse(receipt);
+            int updated = inTx(() -> receiptRepository.markActive(receipt.getId(), leaseOwner, success.versionId()));
+            TransferReceipt current = refresh(receipt.getId(), receipt);
+            if (updated > 0) {
+                log.info("Receipt marked ACTIVE receiptId={} transferId={} workerId={}", receipt.getId(), transferId, leaseOwner);
+                return toResponse(current);
+            }
+            log.warn("Receipt markActive affected 0 rows receiptId={} transferId={} workerId={} actualStatus={}",
+                    receipt.getId(), transferId, leaseOwner, current.getStatus());
+            return toResponseOrThrow(current, result);
         }
         if (result instanceof UploadResult.ChecksumMismatch mismatch) {
-            receipt.markFailed(ReceiptFailureReason.CHECKSUM_MISMATCH, truncate(mismatch.message(), 500));
-            receiptRepository.saveAndFlush(receipt);
-            throw new ReceiptFailedException(toResponse(receipt));
+            int updated = inTx(() -> receiptRepository.markFailed(
+                    receipt.getId(), leaseOwner, ReceiptFailureReason.CHECKSUM_MISMATCH.name(), truncate(mismatch.message(), 500)));
+            TransferReceipt current = refresh(receipt.getId(), receipt);
+            if (updated > 0) {
+                throw new ReceiptFailedException(toResponse(current));
+            }
+            log.warn("Receipt markFailed(checksum) affected 0 rows receiptId={} transferId={} workerId={} actualStatus={}",
+                    receipt.getId(), transferId, leaseOwner, current.getStatus());
+            return toResponseOrThrow(current, result);
         }
         if (result instanceof UploadResult.DefinitiveFailure failure) {
-            receipt.scheduleRetry(
-                    Instant.now().plus(properties.getUpload().getRetryBackoff()),
-                    truncate(failure.message(), 500)
-            );
-            receiptRepository.saveAndFlush(receipt);
-            throw new ReceiptStorageUnavailableException(receipt.getId().toString(), failure.message(), failure.cause());
+            int updated = inTx(() -> receiptRepository.reschedule(
+                    receipt.getId(), leaseOwner, properties.getUpload().getRetryBackoff().toSeconds(), truncate(failure.message(), 500)));
+            TransferReceipt current = refresh(receipt.getId(), receipt);
+            if (updated > 0) {
+                throw new ReceiptStorageUnavailableException(receipt.getId().toString(), failure.message(), failure.cause());
+            }
+            log.warn("Receipt reschedule after definitive failure affected 0 rows receiptId={} transferId={} workerId={} actualStatus={}",
+                    receipt.getId(), transferId, leaseOwner, current.getStatus());
+            return toResponseOrThrow(current, result);
         }
 
         UploadResult.Ambiguous ambiguous = (UploadResult.Ambiguous) result;
-        log.warn("Ambiguous receipt upload result receiptId={} transferId={}: {}",
-                receipt.getId(), transfer.id(), ambiguous.message());
-        int released = receiptRepository.releaseAmbiguousLease(
-                receipt.getId(), leaseOwner, properties.getUpload().getRetryBackoff().toSeconds());
-        if (released == 0) {
-            receipt.releaseAmbiguousLease(Instant.now().plus(properties.getUpload().getRetryBackoff()));
-            receiptRepository.saveAndFlush(receipt);
+        log.warn("Ambiguous receipt upload result receiptId={} transferId={} workerId={}: {}",
+                receipt.getId(), transferId, leaseOwner, ambiguous.message());
+        int updated = inTx(() -> receiptRepository.releaseAmbiguousLease(
+                receipt.getId(), leaseOwner, properties.getUpload().getRetryBackoff().toSeconds()));
+        TransferReceipt refreshed = refresh(receipt.getId(), receipt);
+        if (updated == 0) {
+            log.warn("Receipt releaseAmbiguousLease affected 0 rows receiptId={} transferId={} workerId={} actualStatus={}",
+                    receipt.getId(), transferId, leaseOwner, refreshed.getStatus());
         }
-        TransferReceipt refreshed = receiptRepository.findById(receipt.getId()).orElse(receipt);
-        ReceiptResponse response = toResponse(refreshed);
-        if (refreshed.getStatus() == ReceiptStatus.ACTIVE) {
+        return toResponseOrThrow(refreshed, result);
+    }
+
+    private TransferReceipt createPending(
+            UUID receiptId, TransferResponse transfer, ReceiptFileValidator.ValidatedReceiptFile validated,
+            String objectKey, UUID leaseOwner
+    ) {
+        return inTx(() -> {
+            TransferReceipt pending = TransferReceipt.pending(
+                    receiptId,
+                    transfer.id(),
+                    transfer.customerId(),
+                    validated.sha256Hex(),
+                    objectKey,
+                    validated.contentType(),
+                    validated.originalFilename(),
+                    validated.sizeBytes(),
+                    properties.getS3().getBucket(),
+                    leaseOwner,
+                    java.time.Instant.now().plus(properties.getUpload().getLeaseDuration())
+            );
+            return receiptRepository.saveAndFlush(pending);
+        });
+    }
+
+    private ReceiptResponse toResponseOrThrow(TransferReceipt current, UploadResult result) {
+        ReceiptResponse response = toResponse(current);
+        if (current.getStatus() == ReceiptStatus.ACTIVE) {
             return response;
         }
-        if (refreshed.getStatus() == ReceiptStatus.FAILED) {
+        if (current.getStatus() == ReceiptStatus.FAILED) {
             throw new ReceiptFailedException(response);
         }
+        if (result instanceof UploadResult.DefinitiveFailure failure) {
+            throw new ReceiptStorageUnavailableException(current.getId().toString(), failure.message(), failure.cause());
+        }
         throw new ReceiptUploadPendingException(response);
+    }
+
+    private TransferReceipt refresh(UUID receiptId, TransferReceipt fallback) {
+        return inTx(() -> receiptRepository.findById(receiptId).orElse(fallback));
+    }
+
+    private <T> T inTx(java.util.function.Supplier<T> action) {
+        T result = transactionTemplate.execute(status -> action.get());
+        if (result == null) {
+            throw new IllegalStateException("Transaction returned null");
+        }
+        return result;
+    }
+
+    private int inTx(java.util.function.IntSupplier action) {
+        Integer result = transactionTemplate.execute(status -> action.getAsInt());
+        return result == null ? 0 : result;
     }
 
     private UploadResult putObject(TransferReceipt receipt, MultipartFile file, ReceiptFileValidator.ValidatedReceiptFile validated) {
@@ -136,20 +186,22 @@ public class ReceiptUploadService {
             PutObjectResponse response = s3Client.putObject(request, requestBody(file, validated.sizeBytes()));
             String checksum = response.checksumSHA256();
             if (checksum != null && !checksum.isBlank() && !checksum.equals(base64Sha256(validated.sha256Hex()))) {
+                UploadResult verified = verifyAfterChecksumException(receipt, validated);
+                if (verified != null) {
+                    return verified;
+                }
                 return new UploadResult.ChecksumMismatch("S3 checksum did not match uploaded content");
             }
             return new UploadResult.Success(response.versionId());
         } catch (S3Exception ex) {
             if (isChecksumMismatch(ex)) {
-                return new UploadResult.ChecksumMismatch(CHECKSUM_MISMATCH);
+                UploadResult verified = verifyAfterChecksumException(receipt, validated);
+                if (verified != null) {
+                    return verified;
+                }
+                return new UploadResult.Ambiguous("S3 reported checksum mismatch; verification pending", ex);
             }
-            if (ex.statusCode() >= 400 && ex.statusCode() < 500) {
-                return new UploadResult.DefinitiveFailure("S3 rejected the upload", ex);
-            }
-            if (ex.statusCode() >= 500) {
-                return new UploadResult.DefinitiveFailure("S3 is unavailable", ex);
-            }
-            return new UploadResult.Ambiguous("S3 returned an ambiguous error", ex);
+            return classifyS3Exception(ex);
         } catch (ApiCallTimeoutException | ApiCallAttemptTimeoutException ex) {
             return new UploadResult.Ambiguous("S3 upload timed out", ex);
         } catch (UncheckedIOException ex) {
@@ -169,11 +221,53 @@ public class ReceiptUploadService {
         }, size, file.getContentType());
     }
 
+    private UploadResult verifyAfterChecksumException(
+            TransferReceipt receipt, ReceiptFileValidator.ValidatedReceiptFile validated) {
+        try {
+            var head = s3Client.headObject(HeadObjectRequest.builder()
+                    .bucket(receipt.getStorageBucket())
+                    .key(receipt.getObjectKey())
+                    .checksumMode(ChecksumMode.ENABLED)
+                    .build());
+            String checksum = head.checksumSHA256();
+            if (checksum == null || checksum.isBlank()) {
+                return null;
+            }
+            String expected = base64Sha256(validated.sha256Hex());
+            if (expected.equals(checksum)) {
+                log.warn("S3 returned checksum mismatch but HeadObject confirms object checksum; treating as success receiptId={}", receipt.getId());
+                return new UploadResult.Success(head.versionId());
+            }
+            return new UploadResult.ChecksumMismatch("S3 checksum did not match uploaded content");
+        } catch (RuntimeException ex) {
+            log.debug("Could not verify receipt after checksum exception receiptId={}", receipt.getId(), ex);
+            return null;
+        }
+    }
+
     private static boolean isChecksumMismatch(S3Exception ex) {
         String code = ex.awsErrorDetails() == null ? null : ex.awsErrorDetails().errorCode();
         String message = ex.awsErrorDetails() == null ? ex.getMessage() : ex.awsErrorDetails().errorMessage();
         return "BadDigest".equalsIgnoreCase(code)
                 || (message != null && message.toLowerCase().contains(CHECKSUM_MISMATCH));
+    }
+
+    private UploadResult classifyS3Exception(S3Exception ex) {
+        int status = ex.statusCode();
+        String code = ex.awsErrorDetails() == null ? "" : String.valueOf(ex.awsErrorDetails().errorCode());
+        if (status == 400 || status == 401 || status == 403 || status == 405 || status == 410 || status == 422) {
+            return new UploadResult.DefinitiveFailure("S3 rejected the upload: status=" + status + " code=" + code, ex);
+        }
+        if (status == 404) {
+            return new UploadResult.Ambiguous("S3 returned not found during upload: status=" + status + " code=" + code, ex);
+        }
+        if (status == 408 || status == 409 || status == 429 || status >= 500) {
+            return new UploadResult.Ambiguous("S3 upload outcome ambiguous/transient: status=" + status + " code=" + code, ex);
+        }
+        if (status >= 400 && status < 500) {
+            return new UploadResult.DefinitiveFailure("S3 rejected the upload: status=" + status + " code=" + code, ex);
+        }
+        return new UploadResult.Ambiguous("S3 returned an ambiguous error: status=" + status + " code=" + code, ex);
     }
 
     private static String objectKey(UUID transferId, UUID receiptId, String filename) {

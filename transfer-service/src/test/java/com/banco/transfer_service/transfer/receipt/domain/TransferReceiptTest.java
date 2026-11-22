@@ -42,7 +42,7 @@ class TransferReceiptTest {
     }
 
     @Test
-    void scheduleRetry_clearsLeaseAndKeepsPending() {
+    void scheduleRetry_clearsLeaseOwnerAndKeepsPending() {
         TransferReceipt receipt = pendingReceipt(Instant.parse("2026-11-22T00:00:00Z"));
         Instant nextAttemptAt = Instant.parse("2026-11-22T00:00:30Z");
 
@@ -70,7 +70,7 @@ class TransferReceiptTest {
     }
 
     @Test
-    void releaseAmbiguousLease_clearsLeaseButKeepsPending() {
+    void releaseAmbiguousLease_clearsOwnerButKeepsPending() {
         TransferReceipt receipt = pendingReceipt(Instant.parse("2026-11-22T00:00:00Z"));
         Instant nextAttemptAt = Instant.parse("2026-11-22T00:05:00Z");
 
