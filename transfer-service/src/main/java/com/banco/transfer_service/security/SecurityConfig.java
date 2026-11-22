@@ -54,6 +54,8 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/transfers", "/api/v1/transfers/**")
                         .access(require("SCOPE_transfer.read", "ROLE_TRANSFER_READ"))
+                        .requestMatchers(HttpMethod.POST, "/api/v1/transfers/*/receipts")
+                        .access(require("SCOPE_transfer.write", "ROLE_TRANSFER_WRITE"))
                         .requestMatchers(HttpMethod.POST, "/api/v1/transfers")
                         .access(require("SCOPE_transfer.write", "ROLE_TRANSFER_WRITE"))
                         .anyRequest().authenticated()
