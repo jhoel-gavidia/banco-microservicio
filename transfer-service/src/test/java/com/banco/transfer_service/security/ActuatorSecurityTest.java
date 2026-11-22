@@ -2,6 +2,7 @@ package com.banco.transfer_service.security;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
@@ -10,19 +11,23 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK, properties = {
-        "spring.autoconfigure.exclude="
-                + "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,"
-                + "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration,"
-                + "org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration,"
-                + "org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration,"
-                + "org.springframework.boot.actuate.autoconfigure.jdbc.DataSourceHealthContributorAutoConfiguration",
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK, classes = ActuatorSecurityTest.TestApplication.class, properties = {
         "outbox.publisher.enabled=false",
         "transfer.orchestrator.enabled=false",
         "transfer.receipts.reconcile.enabled=false"
 })
 @AutoConfigureMockMvc
 class ActuatorSecurityTest {
+
+    @SpringBootApplication(exclude = {
+            org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration.class,
+            org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration.class,
+            org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration.class,
+            org.springframework.boot.kafka.autoconfigure.KafkaAutoConfiguration.class,
+            org.springframework.boot.jdbc.autoconfigure.health.DataSourceHealthContributorAutoConfiguration.class
+    })
+    static class TestApplication {
+    }
 
     @Autowired
     private MockMvc mockMvc;
