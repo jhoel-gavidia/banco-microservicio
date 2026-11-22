@@ -180,19 +180,7 @@ public class ReceiptUploadService {
     }
 
     private static ReceiptResponse toResponse(TransferReceipt receipt) {
-        return new ReceiptResponse(
-                receipt.getId(),
-                receipt.getTransferId(),
-                receipt.getCustomerId(),
-                receipt.getStatus(),
-                receipt.getContentType(),
-                receipt.getOriginalFilename(),
-                receipt.getSizeBytes(),
-                receipt.getSha256Hex(),
-                receipt.getCreatedAt(),
-                receipt.getConfirmedAt(),
-                receipt.getFailureReason()
-        );
+        return ReceiptResponse.from(receipt);
     }
 
     private sealed interface UploadResult permits UploadResult.Success, UploadResult.DefinitiveFailure,

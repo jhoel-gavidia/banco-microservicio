@@ -11,6 +11,7 @@ import com.banco.transfer_service.security.SecurityProblems;
 import com.banco.transfer_service.transfer.exception.TransferNotFoundException;
 import com.banco.transfer_service.transfer.receipt.dto.ReceiptResponse;
 import com.banco.transfer_service.transfer.receipt.exception.ReceiptFailedException;
+import com.banco.transfer_service.transfer.receipt.exception.ReceiptIntegrityException;
 import com.banco.transfer_service.transfer.receipt.exception.ReceiptInvalidFileException;
 import com.banco.transfer_service.transfer.receipt.exception.ReceiptNotFoundException;
 import com.banco.transfer_service.transfer.receipt.exception.ReceiptStorageUnavailableException;
@@ -147,6 +148,14 @@ public class GlobalExceptionHandler {
         problem.setType(URI.create("https://banco.local/problems/receipt-not-found"));
         problem.setTitle("Receipt not found");
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(withCorrelation(problem));
+    }
+
+    @ExceptionHandler(ReceiptIntegrityException.class)
+    public ResponseEntity<ProblemDetail> handleReceiptIntegrity(ReceiptIntegrityException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, ex.getMessage());
+        problem.setType(URI.create("https://banco.local/problems/receipt-integrity-failed"));
+        problem.setTitle("Receipt integrity failed");
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(withCorrelation(problem));
     }
 
     @ExceptionHandler(ReceiptFailedException.class)
