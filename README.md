@@ -224,6 +224,56 @@ Variables principales (valores por defecto en `application.yaml`):
 
 Para local con el compose: endpoint `http://localhost:4566`, `path-style-access-enabled=true`, bucket `banco-comprobantes-local`, credenciales de prueba Floci.
 
+## Contenedores e imágenes
+
+Los tres módulos tienen `Dockerfile` multi-stage independientes (build Maven, capas Spring Boot layertools, usuario no root) y `.dockerignore` propio. La imagen base es Amazon Corretto 21 Alpine 3.24 fijada por digest.
+
+Requisitos: Docker Engine/Desktop con Docker Compose v2.
+
+### Arranque local con Compose
+
+```powershell
+# levantar infraestructura + los tres servicios
+docker compose --profile apps up --build -d
+
+# ver logs
+docker compose --profile apps logs -f account-service
+docker compose --profile apps logs -f transfer-service
+docker compose --profile apps logs -f api-gateway
+
+# parar y eliminar contenedores del perfil
+docker compose --profile apps down
+```
+
+El compose funciona sin `.env` gracias a defaults dev/local. Si necesitas personalizar valores, copia `.env.example` a `.env`; `.env` está ignorado por git y no debe commitearse. Los `.dockerignore` excluyen `.env` y artefactos locales del contexto de build.
+
+Para desarrollo local sin contenedores, sigue valiendo el flujo de `## Arrancarlo` con `mvnw spring-boot:run`.
+
+### Variables relevantes
+
+| Variable | Default | Uso |
+| --- | --- | --- |
+| `IMAGE_REGISTRY` | `ghcr.io/jhoel-gavidia/banco-microservicio` | Prefijo de imagen para servicios del perfil `apps` |
+| `IMAGE_TAG` | `local` | Tag local de las imágenes |
+| `ACCOUNT_SERVICE_PORT` / `TRANSFER_SERVICE_PORT` / `API_GATEWAY_PORT` | `8081` / `8083` / `8084` | Puertos host |
+| `ACCOUNTS_DB_PORT` / `KAFKA_PORT` / `KEYCLOAK_PORT` / `FLOCI_PORT` | `5432` / `9092` / `8080` / `4566` | Puertos host de infraestructura |
+| `ACCOUNTS_DB_*` / `TRANSFERS_DB_*` | ver `.env.example` | Credenciales/nombres BD dev local |
+| `KEYCLOAK_ISSUER_URI` | `http://localhost:8080/realms/banco` | Issuer esperado en JWT; en compose se valida ese issuer y se descarga JWKS desde `keycloak:8080` dentro de la red Docker |
+| `AWS_REGION` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `RECEIPT_S3_BUCKET` | `us-east-1` / `test` / `test` / `banco-comprobantes-local` | Config S3 local vía Floci, sin AWS real ni costo |
+
+Variables de servicio dentro de contenedor (ya definidas en `compose.yaml`): `DB_URL`, `DB_USER`, `DB_PASSWORD`, `KAFKA_BOOTSTRAP_SERVERS`, `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI`, `KEYCLOAK_TOKEN_URI`, `ACCOUNT_SERVICE_BASE_URL`, `ACCOUNT_SERVICE_URL`, `TRANSFER_SERVICE_URL`, `RECEIPT_S3_ENDPOINT`.
+
+### Sondas y seguridad
+
+- Públicas sin token: `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness`.
+- `/actuator/health` no expone detalles sensibles sin autorización (`show-details: when-authorized`).
+- `/actuator/metrics` y `/actuator/prometheus` requieren autenticación.
+- Las imágenes corren como usuario no root y no incluyen secretos.
+
+### CI / GHCR
+
+Workflow: `.github/workflows/ci-images.yml`. Se ejecuta en `push` y `pull_request` con matriz por módulo (`account-service`, `transfer-service`, `api-gateway`). Cada job hace: `mvn -B -ntp test`, build de imagen Docker, scan Trivy, generación de SBOM y, solo en `push` a `main`, login/push a GHCR con tags `sha-<7>` y `latest`. No hay despliegue automático a cloud.
+
 ## Tests
 
 ```powershell
