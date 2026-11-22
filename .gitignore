@@ -24,3 +24,8 @@ Desktop.ini
 
 # Logs
 *.log
+# Local env files
+.env
+.env.local
+.env.*.local
+!.env.example

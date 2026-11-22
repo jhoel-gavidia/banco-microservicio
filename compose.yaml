@@ -6,19 +6,19 @@ services:
     restart: unless-stopped
 
     environment:
-      POSTGRES_DB: accounts_db
-      POSTGRES_USER: accounts
-      POSTGRES_PASSWORD: accounts
+      POSTGRES_DB: ${ACCOUNTS_DB_NAME:-accounts_db}
+      POSTGRES_USER: ${ACCOUNTS_DB_USER:-accounts}
+      POSTGRES_PASSWORD: ${ACCOUNTS_DB_PASSWORD:-accounts}
 
     ports:
-      - "5432:5432"
+      - "${ACCOUNTS_DB_PORT:-5432}:5432"
 
     volumes:
       - accounts-db-data:/var/lib/postgresql
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
 
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U accounts -d accounts_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${ACCOUNTS_DB_USER:-accounts} -d ${ACCOUNTS_DB_NAME:-accounts_db}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -31,11 +31,12 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
@@ -44,7 +45,7 @@ services:
       KAFKA_NUM_PARTITIONS: 3
 
     ports:
-      - "9092:9092"
+      - "${KAFKA_PORT:-9092}:9092"
 
     volumes:
       - kafka-data:/var/lib/kafka/data
@@ -64,17 +65,18 @@ services:
       - --import-realm
 
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://accounts-db:5432/keycloak_db
-      KC_DB_USERNAME: accounts
-      KC_DB_PASSWORD: accounts
+      KC_DB_USERNAME: ${ACCOUNTS_DB_USER:-accounts}
+      KC_DB_PASSWORD: ${ACCOUNTS_DB_PASSWORD:-accounts}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-localhost}
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_PORT: "8080"
 
     ports:
-      - "8080:8080"
+      - "${KEYCLOAK_PORT:-8080}:8080"
 
     volumes:
       - ./keycloak:/opt/keycloak/data/import:ro
@@ -89,10 +91,112 @@ services:
     restart: unless-stopped
 
     ports:
-      - "127.0.0.1:4566:4566"
+      - "127.0.0.1:${FLOCI_PORT:-4566}:4566"
 
     environment:
-      FLOCI_DEFAULT_REGION: us-east-1
+      FLOCI_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+
+  account-service:
+    profiles: ["apps"]
+    build:
+      context: ./account-service
+      dockerfile: Dockerfile
+    image: ${IMAGE_REGISTRY:-ghcr.io/jhoel-gavidia/banco-microservicio}/account-service:${IMAGE_TAG:-local}
+    container_name: account-service
+    restart: unless-stopped
+    depends_on:
+      accounts-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    environment:
+      DB_URL: jdbc:postgresql://accounts-db:5432/${ACCOUNTS_DB_NAME:-accounts_db}
+      DB_USER: ${ACCOUNTS_DB_USER:-accounts}
+      DB_PASSWORD: ${ACCOUNTS_DB_PASSWORD:-accounts}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:8080/realms/banco}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/banco/protocol/openid-connect/certs
+    ports:
+      - "${ACCOUNT_SERVICE_PORT:-8081}:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8081/actuator/health/liveness || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  transfer-service:
+    profiles: ["apps"]
+    build:
+      context: ./transfer-service
+      dockerfile: Dockerfile
+    image: ${IMAGE_REGISTRY:-ghcr.io/jhoel-gavidia/banco-microservicio}/transfer-service:${IMAGE_TAG:-local}
+    container_name: transfer-service
+    restart: unless-stopped
+    depends_on:
+      accounts-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+      floci:
+        condition: service_started
+      account-service:
+        condition: service_started
+    environment:
+      DB_URL: jdbc:postgresql://accounts-db:5432/${TRANSFERS_DB_NAME:-transfers_db}
+      DB_USER: ${TRANSFERS_DB_USER:-transfers}
+      DB_PASSWORD: ${TRANSFERS_DB_PASSWORD:-transfers}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:8080/realms/banco}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/banco/protocol/openid-connect/certs
+      KEYCLOAK_TOKEN_URI: http://keycloak:8080/realms/banco/protocol/openid-connect/token
+      ACCOUNT_SERVICE_BASE_URL: http://account-service:8081
+      RECEIPT_S3_ENDPOINT: http://floci:4566
+      RECEIPT_S3_BUCKET: ${RECEIPT_S3_BUCKET:-banco-comprobantes-local}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+    ports:
+      - "${TRANSFER_SERVICE_PORT:-8083}:8083"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8083/actuator/health/liveness || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  api-gateway:
+    profiles: ["apps"]
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    image: ${IMAGE_REGISTRY:-ghcr.io/jhoel-gavidia/banco-microservicio}/api-gateway:${IMAGE_TAG:-local}
+    container_name: api-gateway
+    restart: unless-stopped
+    depends_on:
+      keycloak:
+        condition: service_started
+      account-service:
+        condition: service_started
+      transfer-service:
+        condition: service_started
+    environment:
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:8080/realms/banco}
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/banco/protocol/openid-connect/certs
+      ACCOUNT_SERVICE_URL: http://account-service:8081
+      TRANSFER_SERVICE_URL: http://transfer-service:8083
+    ports:
+      - "${API_GATEWAY_PORT:-8084}:8084"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8084/actuator/health/liveness || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
 volumes:
   accounts-db-data:

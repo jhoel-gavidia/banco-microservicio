@@ -1,15 +1,17 @@
 package com.banco.transfer_service.security;
 
+import com.banco.transfer_service.correlation.CorrelationFilter;
 import com.banco.transfer_service.transfer.domain.TransferStatus;
 import com.banco.transfer_service.transfer.dto.TransferResponse;
 import com.banco.transfer_service.transfer.service.TransferService;
+import com.banco.transfer_service.transfer.web.GlobalExceptionHandler;
 import com.banco.transfer_service.transfer.web.TransferController;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
-import org.springframework.context.annotation.Import;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -113,9 +115,25 @@ class AuthenticatedCustomerTest {
     }
 }
 
-@WebMvcTest(TransferController.class)
-@Import({SecurityConfig.class, AuthenticatedCustomer.class})
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK, classes = TransferApiSecurityTest.TestApplication.class)
+@AutoConfigureMockMvc
 class TransferApiSecurityTest {
+
+    @org.springframework.boot.autoconfigure.SpringBootApplication(scanBasePackageClasses = {
+            TransferController.class,
+            GlobalExceptionHandler.class,
+            CorrelationFilter.class,
+            SecurityConfig.class,
+            AuthenticatedCustomer.class
+    }, exclude = {
+            org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration.class,
+            org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration.class,
+            org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration.class,
+            org.springframework.boot.kafka.autoconfigure.KafkaAutoConfiguration.class,
+            org.springframework.boot.jdbc.autoconfigure.health.DataSourceHealthContributorAutoConfiguration.class
+    })
+    static class TestApplication {
+    }
 
     private static final String TOKEN = "signed-token";
     private static final String CORRELATION = "corr-transfer-web";
