@@ -84,7 +84,7 @@ services:
         condition: service_healthy
 
   floci:
-    image: floci/floci:latest
+    image: floci/floci:2.5.0
     container_name: banco-floci
     restart: unless-stopped
 
