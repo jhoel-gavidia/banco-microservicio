@@ -45,7 +45,7 @@ public class SecurityConfig {
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers("/actuator/health").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/accounts/**")
                         .hasAnyRole("ADMIN", "ACCOUNT_READ", "ACCOUNT_INTERNAL")
                         .requestMatchers(HttpMethod.POST, "/api/v1/accounts/*/deposits")

@@ -51,7 +51,7 @@ public class SecurityConfig {
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers("/actuator/health").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/transfers", "/api/v1/transfers/**")
                         .access(require("SCOPE_transfer.read", "ROLE_TRANSFER_READ"))
                         .requestMatchers(HttpMethod.POST, "/api/v1/transfers/*/receipts")

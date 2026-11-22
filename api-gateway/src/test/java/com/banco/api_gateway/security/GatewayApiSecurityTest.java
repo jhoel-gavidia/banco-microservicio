@@ -121,6 +121,8 @@ class GatewayApiSecurityTest {
                 .andExpect(jsonPath("$.correlationId").value(CORRELATION));
     }
 
+
+
     private void authenticate(String scope, List<String> roles) {
         var builder = Jwt.withTokenValue(TOKEN)
                 .header("alg", "none")
