@@ -99,3 +99,12 @@ Estado: Bloque 1 cerrado. Este documento fija las decisiones que los Bloques 2 a
 - La linea base de 65 tests se conserva. `TransferApiSecurityTest` vive en `AuthenticatedCustomerTest.java`.
 - Con los 6 tests de `ReceiptS3ConfigTest`, el total es 71 tests verdes.
 - `mvn clean test` no depende de Floci ni de Docker.
+
+## 16. Auditoría y endurecimiento
+
+- `claimPending` usa SQL nativo PostgreSQL con `FOR UPDATE SKIP LOCKED`; validado con IT real (`TransferReceiptRepositoryIT`) para atomicidad y ausencia de doble claim.
+- Heartbeat de lease en transacción corta (`TransactionTemplate`): distingue renovación exitosa, pérdida de ownership (`updated==0`) y fallo de infraestructura. No abre transacciones durante S3.
+- Transiciones de worker (`markActive/markFailed/reschedule/releaseAmbiguousLease`) exigen `status=PENDING`, `lease_owner` y `lease_expires_at > now()`. `updated==0` => releer estado y resolver idempotentemente; no asumir éxito.
+- Reconciliación consulta S3 con `ChecksumMode.ENABLED` antes de fallar por max attempts. Objeto válido => ACTIVE; checksum ausente => reschedule/fallo terminal según intentos; checksum distinto => `CHECKSUM_MISMATCH`.
+- Errores S3: 4xx definitivos (400/401/403/405/410/422 y otros 4xx no ambiguos) como fallo definitivo; 408/409/429/5xx/timeouts SDK como ambiguos/transitorios, sin confirmar éxito sin evidencia.
+- Huérfanos S3: no se borran automáticamente. Detección recomendada por inventario S3 + comparación con DB y reporte/alerta operativa; objetos sin fila requieren proceso manual/controlado.
