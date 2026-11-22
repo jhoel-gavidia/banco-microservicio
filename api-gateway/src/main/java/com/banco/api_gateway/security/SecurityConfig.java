@@ -67,6 +67,8 @@ public class SecurityConfig {
                         ))
                         .requestMatchers(HttpMethod.GET, "/api/v1/transfers", "/api/v1/transfers/**")
                         .access(requireAll("SCOPE_transfer.read", "ROLE_TRANSFER_READ"))
+                        .requestMatchers(HttpMethod.POST, "/api/v1/transfers/*/receipts")
+                        .access(requireAll("SCOPE_transfer.write", "ROLE_TRANSFER_WRITE"))
                         .requestMatchers(HttpMethod.POST, "/api/v1/transfers")
                         .access(requireAll("SCOPE_transfer.write", "ROLE_TRANSFER_WRITE"))
                         .anyRequest().authenticated()

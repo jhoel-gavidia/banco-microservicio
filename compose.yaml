@@ -83,6 +83,17 @@ services:
       accounts-db:
         condition: service_healthy
 
+  floci:
+    image: floci/floci:2.5.0
+    container_name: banco-floci
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:4566:4566"
+
+    environment:
+      FLOCI_DEFAULT_REGION: us-east-1
+
 volumes:
   accounts-db-data:
   kafka-data:

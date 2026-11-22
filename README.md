@@ -20,7 +20,7 @@ cd api-gateway
 .\mvnw.cmd spring-boot:run
 ```
 
-El compose levanta PostgreSQL en localhost:5432, Keycloak en localhost:8080 y Kafka en localhost:9092. `account-service` queda en http://localhost:8081, `transfer-service` en http://localhost:8083 y `api-gateway` en http://localhost:8084. Cada servicio usa su propia BD (`accounts_db` y `transfers_db`) y su propio usuario con permisos solo sobre esa BD; en producción serían instancias distintas.
+El compose levanta PostgreSQL en localhost:5432, Keycloak en localhost:8080, Kafka en localhost:9092 y Floci (S3 local compatible) en localhost:4566. `account-service` queda en http://localhost:8081, `transfer-service` en http://localhost:8083 y `api-gateway` en http://localhost:8084. Cada servicio usa su propia BD (`accounts_db` y `transfers_db`) y su propio usuario con permisos solo sobre esa BD; en producción serían instancias distintas.
 
 ### account-service
 
@@ -40,6 +40,9 @@ Solo las cuentas `ACTIVE` pueden mover saldo. Un depósito o retiro sobre `BLOCK
 - `POST /api/v1/transfers` → 201. Body: `sourceAccountId`, `targetAccountId`, `amount`, `currency`, `reference`. Exige el header `Idempotency-Key`.
 - `GET /api/v1/transfers/{id}` → 200 o 404.
 - `GET /api/v1/transfers` → 200 con las transferencias del propietario, o todas si es `admin`.
+- `POST /api/v1/transfers/{id}/receipts` → 201/202/409/503. Sube un comprobante (`multipart/form-data`, campo `file`).
+- `GET /api/v1/transfers/{id}/receipts` → 200 con los comprobantes de la transferencia.
+- `GET /api/v1/transfers/{id}/receipts/{receiptId}/file` → 200 con el archivo verificado, o 404/502.
 - `GET /actuator/health`, `GET /actuator/metrics`, `GET /actuator/prometheus`.
 
 `reference` la elige el cliente y es obligatoria. Se guarda en el asiento y `UNIQUE (account_id, reference, type)` evita que el mismo movimiento se registre dos veces; repetirla devuelve 409. Retirar más de lo disponible devuelve 422.
@@ -179,6 +182,48 @@ Los endpoints `/actuator/health`, `/actuator/metrics` y `/actuator/prometheus` p
 
 `GET /actuator/health` incluye el componente `outbox`. Si el evento pendiente más antiguo supera `OUTBOX_STALE_THRESHOLD` (1 minuto por defecto), el estado general pasa a `DOWN` y el detalle muestra `pending`, `oldestPendingAgeSeconds` y `staleThresholdSeconds`. Esto detecta que el publicador dejó de publicar, no solo que la base de datos responda.
 
+## Comprobantes de transferencia
+
+`transfer-service` permite subir, listar y descargar comprobantes asociados a una transferencia. Los archivos se guardan en un bucket S3 compatible (Floci en local) y su estado se persiste en `transfer_receipts` (migración V6). El diseño detallado está en `transfer-service/RECEIPT_DECISIONS.md`.
+
+### Endpoints
+
+| Método | Ruta | Auth | Resultado |
+| --- | --- | --- | --- |
+| `POST` | `/api/v1/transfers/{id}/receipts` | `SCOPE_transfer.write` + `ROLE_TRANSFER_WRITE` | 201 ACTIVE; 202 PENDING con `Location` si el resultado S3 es ambiguo; 409 `receipt-failed`; 503 `receipt-storage-unavailable`; 400 `receipt-invalid-file`; 404 transferencia inexistente/ajena |
+| `GET` | `/api/v1/transfers/{id}/receipts` | `SCOPE_transfer.read` + `ROLE_TRANSFER_READ` | 200 con lista `ReceiptResponse` |
+| `GET` | `/api/v1/transfers/{id}/receipts/{receiptId}/file` | `SCOPE_transfer.read` + `ROLE_TRANSFER_READ` | 200 bytes verificados; 404 no encontrado/ajeno/no ACTIVE; 502 `receipt-integrity-failed` |
+
+La propiedad se resuelve contra la transferencia: el `customer_id` del comprobante es siempre `transfer.customerId()` (nunca el admin). Un usuario normal solo ve/descarga comprobantes de sus transferencias; `admin` puede consultar por transferencia, pero no es bypass HTTP.
+
+### Flujo de carga
+
+- **Validación antes de persistir**: tamaño (<= 5MB por defecto), SHA-256 streaming, magic bytes/MIME permitido (PDF, PNG, JPEG), nombre saneado y coherencia de content-type. Un archivo inválido responde 400 y no crea fila PENDING.
+- **PENDING**: se crea con `lease_owner`, `lease_expires_at`, `next_attempt_at` inicial = lease, `attempts=1` y `object_key` determinista `transfers/{transferId}/receipts/{receiptId}/{safeFilename}`.
+- **Upload S3**: usa `RequestBody.fromContentProvider(...)` replayable y checksum SHA-256. Un éxito confirma ACTIVE (201). Un fallo definitivo de checksum marca FAILED (409). Un fallo definitivo de storage reprograma retry y responde 503 con `receiptId`. Un timeout/resultado ambiguo libera lease, reconsulta el estado y responde 201/409/202 según corresponda.
+- **Heartbeat de lease**: mientras el upload está en curso se renueva el lease por SQL (`now() + leaseDuration`) solo si el receipt sigue PENDING, con el mismo owner y lease vigente.
+
+### Reconciliación
+
+`ReceiptReconciler` corre con `@Scheduled` (habilitable por config) y reclama lotes PENDING con CTE `FOR UPDATE SKIP LOCKED`. Hace `HeadObject` en S3: checksum coincide => ACTIVE; checksum distinto => FAILED; objeto ausente antes de `missingGrace` => reschedule; ausente tras gracia o max attempts => FAILED; 4xx/5xx según clasificación.
+
+### Descarga segura
+
+Solo se sirve un comprobante `ACTIVE`. El archivo se descarga a un temporal endurecido (`temp-dir/receipts`), se validan checksum S3 y SHA-256 contra metadata antes de exponer bytes, y se aplican timeouts/watchdog cooperativo con `ResponseInputStream.abort()`. Headers: `Content-Disposition` attachment, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`.
+
+El directorio temporal intenta ACL/POSIX restrictiva al arrancar; si no puede verificarse, el arranque falla salvo `transfer.receipts.download.allow-unverified-temp-acl=true` (solo dev/test).
+
+### Configuración
+
+Variables principales (valores por defecto en `application.yaml`):
+
+- S3/Floci: `RECEIPT_S3_BUCKET`, `RECEIPT_S3_REGION`, `RECEIPT_S3_ENDPOINT`, `RECEIPT_S3_ACCESS_KEY`, `RECEIPT_S3_SECRET_KEY`, `RECEIPT_S3_PATH_STYLE`, `RECEIPT_S3_CHECKSUM_*`.
+- Upload: `RECEIPT_MAX_FILE_SIZE`, `RECEIPT_UPLOAD_MAX_ATTEMPTS`, `RECEIPT_UPLOAD_LEASE_DURATION`, `RECEIPT_UPLOAD_HEARTBEAT_INTERVAL`, `RECEIPT_UPLOAD_RETRY_BACKOFF`, `RECEIPT_UPLOAD_MISSING_GRACE`.
+- Download: `RECEIPT_DOWNLOAD_MAX_CONCURRENT`, `RECEIPT_DOWNLOAD_TEMP_DIR`, `RECEIPT_DOWNLOAD_SOCKET_READ_TIMEOUT`, `RECEIPT_DOWNLOAD_FIRST_READ_TIMEOUT`, `RECEIPT_DOWNLOAD_TOTAL_SOFT_DEADLINE`, `RECEIPT_DOWNLOAD_STREAM_BUFFER_SIZE`, `RECEIPT_DOWNLOAD_TEMP_TTL`, `RECEIPT_DOWNLOAD_ALLOW_UNVERIFIED_TEMP_ACL`.
+- Reconcile: `RECEIPT_RECONCILE_ENABLED`, `RECEIPT_RECONCILE_INTERVAL`, `RECEIPT_RECONCILE_BATCH_SIZE`.
+
+Para local con el compose: endpoint `http://localhost:4566`, `path-style-access-enabled=true`, bucket `banco-comprobantes-local`, credenciales de prueba Floci.
+
 ## Tests
 
 ```powershell
@@ -192,11 +237,19 @@ Los endpoints `/actuator/health`, `/actuator/metrics` y `/actuator/prometheus` p
 
 # uno solo:
 .\mvnw.cmd test "-Dtest=AccountRepositoryIT"
+
+# desde transfer-service/
+
+# suite normal (sin Docker/Floci, excluye *IT):
+.\mvnw.cmd clean test
+
+# integración de comprobantes con Postgres + Floci (requiere Docker):
+.\mvnw.cmd -DskipITs=false failsafe:integration-test failsafe:verify
 ```
 
 En `api-gateway/` basta `.\mvnw.cmd test`: 15 tests sin Docker. El ruteo se comprueba contra un `HttpServer` embebido, así que no hace falta arrancar los servicios ni Keycloak.
 
-Con `mvn test` a secas Surefire corre las clases `*Test` y `*Tests`: entran `AccountServiceImplTest` y `AccountServiceApplicationTests`. Ojo que esta última ya usa Testcontainers, así que **necesita Docker aunque no se llame `*IT`**. Los `*IT` no los corre por defecto; hay que pedirlos con `-Dtest=...`. Cuando se monte CI se añadirá Failsafe para que `mvn verify` los corra solos.
+Con `mvn test` a secas Surefire corre las clases `*Test` y `*Tests`. En `account-service`, `AccountServiceApplicationTests` usa Testcontainers, así que **necesita Docker aunque no se llame `*IT`**; los `*IT` no se corren por defecto y se piden con `-Dtest=...`. En `transfer-service`, Surefire excluye `**/*IT.java` y Failsafe los ejecuta solo cuando se habilita explícitamente (`-DskipITs=false`), para que `mvn clean test` no dependa de Docker/Floci.
 
 Usamos Testcontainers con `postgres:18-alpine`, la misma imagen del compose. No H2: las regex de los CHECK, `gen_random_uuid()`, el trigger del ledger y el `@Generated` de `createdAt` no se comportan igual. Un test verde en H2 no dice mucho sobre lo que va a pasar en producción.
 

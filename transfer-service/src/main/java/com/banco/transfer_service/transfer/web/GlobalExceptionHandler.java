@@ -9,6 +9,14 @@ import com.banco.transfer_service.idempotency.exception.IdempotencyKeyInProgress
 import com.banco.transfer_service.idempotency.exception.IdempotencyKeyReusedException;
 import com.banco.transfer_service.security.SecurityProblems;
 import com.banco.transfer_service.transfer.exception.TransferNotFoundException;
+import com.banco.transfer_service.transfer.receipt.dto.ReceiptResponse;
+import com.banco.transfer_service.transfer.receipt.exception.ReceiptFailedException;
+import com.banco.transfer_service.transfer.receipt.exception.ReceiptIntegrityException;
+import com.banco.transfer_service.transfer.receipt.exception.ReceiptInvalidFileException;
+import com.banco.transfer_service.transfer.receipt.exception.ReceiptNotFoundException;
+import com.banco.transfer_service.transfer.receipt.exception.ReceiptStorageUnavailableException;
+import com.banco.transfer_service.transfer.receipt.exception.ReceiptUploadPendingException;
+import com.banco.transfer_service.transfer.receipt.web.ReceiptController;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +27,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.net.URI;
 import java.util.LinkedHashMap;
@@ -113,6 +122,67 @@ public class GlobalExceptionHandler {
         problem.setTitle("Transfer not found");
 
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(withCorrelation(problem));
+    }
+
+    @ExceptionHandler(ReceiptInvalidFileException.class)
+    public ResponseEntity<ProblemDetail> handleReceiptInvalidFile(ReceiptInvalidFileException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setType(URI.create("https://banco.local/problems/receipt-invalid-file"));
+        problem.setTitle("Invalid receipt file");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(withCorrelation(problem));
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ProblemDetail> handleMaxUpload(MaxUploadSizeExceededException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST, "Receipt file exceeds the allowed size"
+        );
+        problem.setType(URI.create("https://banco.local/problems/receipt-invalid-file"));
+        problem.setTitle("Invalid receipt file");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(withCorrelation(problem));
+    }
+
+    @ExceptionHandler(ReceiptNotFoundException.class)
+    public ResponseEntity<ProblemDetail> handleReceiptNotFound(ReceiptNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setType(URI.create("https://banco.local/problems/receipt-not-found"));
+        problem.setTitle("Receipt not found");
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(withCorrelation(problem));
+    }
+
+    @ExceptionHandler(ReceiptIntegrityException.class)
+    public ResponseEntity<ProblemDetail> handleReceiptIntegrity(ReceiptIntegrityException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, ex.getMessage());
+        problem.setType(URI.create("https://banco.local/problems/receipt-integrity-failed"));
+        problem.setTitle("Receipt integrity failed");
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(withCorrelation(problem));
+    }
+
+    @ExceptionHandler(ReceiptFailedException.class)
+    public ResponseEntity<ProblemDetail> handleReceiptFailed(ReceiptFailedException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setType(URI.create("https://banco.local/problems/receipt-failed"));
+        problem.setTitle("Receipt failed");
+        problem.setProperty("receipt", ex.getReceipt());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(withCorrelation(problem));
+    }
+
+    @ExceptionHandler(ReceiptStorageUnavailableException.class)
+    public ResponseEntity<ProblemDetail> handleReceiptStorageUnavailable(ReceiptStorageUnavailableException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage()
+        );
+        problem.setType(URI.create("https://banco.local/problems/receipt-storage-unavailable"));
+        problem.setTitle("Receipt storage unavailable");
+        problem.setProperty("receiptId", ex.getReceiptId());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(withCorrelation(problem));
+    }
+
+    @ExceptionHandler(ReceiptUploadPendingException.class)
+    public ResponseEntity<ReceiptResponse> handleReceiptPending(ReceiptUploadPendingException ex) {
+        return ResponseEntity.accepted()
+                .location(ReceiptController.receiptLocation(ex.getReceipt().transferId(), ex.getReceipt().id()))
+                .body(ex.getReceipt());
     }
 
     @ExceptionHandler(AccountServiceException.class)
