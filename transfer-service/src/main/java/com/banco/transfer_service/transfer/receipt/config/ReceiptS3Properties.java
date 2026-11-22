@@ -22,12 +22,14 @@ public class ReceiptS3Properties {
     private S3 s3 = new S3();
     private Upload upload = new Upload();
     private Download download = new Download();
+    private Reconcile reconcile = new Reconcile();
 
     @PostConstruct
     void validate() {
         validateS3();
         validateUpload();
         validateDownload();
+        validateReconcile();
     }
 
     public boolean hasEndpoint() {
@@ -92,6 +94,12 @@ public class ReceiptS3Properties {
                 "download.stream-buffer-size must be between 1KB and 1MB");
     }
 
+    private void validateReconcile() {
+        require(reconcile != null, "reconcile configuration is required");
+        require(positive(reconcile.interval), "reconcile.interval must be positive");
+        require(reconcile.batchSize >= 1, "reconcile.batch-size must be at least 1");
+    }
+
     private static void require(boolean condition, String message) {
         if (!condition) {
             throw new IllegalStateException(prefix(message));
@@ -154,5 +162,14 @@ public class ReceiptS3Properties {
         private DataSize streamBufferSize = DataSize.ofKilobytes(8);
         private Duration tempTtl = Duration.ofHours(1);
         private boolean allowUnverifiedTempAcl;
+    }
+
+    @Getter
+    @Setter
+    public static class Reconcile {
+
+        private boolean enabled = true;
+        private Duration interval = Duration.ofMinutes(1);
+        private int batchSize = 20;
     }
 }

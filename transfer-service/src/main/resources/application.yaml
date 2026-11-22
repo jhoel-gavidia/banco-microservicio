@@ -138,6 +138,10 @@ transfer:
       heartbeat-interval: ${RECEIPT_HEARTBEAT_INTERVAL:30s}
       retry-backoff: ${RECEIPT_RETRY_BACKOFF:5s}
       missing-grace: ${RECEIPT_MISSING_GRACE:2m}
+    reconcile:
+      enabled: ${RECEIPT_RECONCILE_ENABLED:true}
+      interval: ${RECEIPT_RECONCILE_INTERVAL:1m}
+      batch-size: ${RECEIPT_RECONCILE_BATCH_SIZE:20}
     download:
       max-concurrent: ${RECEIPT_DOWNLOAD_MAX_CONCURRENT:4}
       temp-dir: ${RECEIPT_TEMP_DIR:${java.io.tmpdir}}
