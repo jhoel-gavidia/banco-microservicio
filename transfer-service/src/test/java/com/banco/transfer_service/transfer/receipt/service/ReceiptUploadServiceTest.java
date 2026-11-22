@@ -54,6 +54,8 @@ class ReceiptUploadServiceTest {
     private ReceiptFileValidator fileValidator;
     @Mock
     private S3Client s3Client;
+    @Mock
+    private ReceiptLeaseHeartbeat leaseHeartbeat;
 
     private ReceiptS3Properties properties;
     private ReceiptUploadService service;
@@ -65,7 +67,8 @@ class ReceiptUploadServiceTest {
         properties.getS3().setRegion("us-east-1");
         properties.getUpload().setLeaseDuration(java.time.Duration.ofMinutes(2));
         properties.getUpload().setRetryBackoff(java.time.Duration.ofSeconds(5));
-        service = new ReceiptUploadService(transferService, receiptRepository, fileValidator, properties, s3Client);
+        service = new ReceiptUploadService(transferService, receiptRepository, fileValidator, properties, s3Client, leaseHeartbeat);
+        when(leaseHeartbeat.start(any(UUID.class), any(UUID.class))).thenReturn(null);
     }
 
     @Test

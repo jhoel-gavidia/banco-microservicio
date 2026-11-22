@@ -200,9 +200,65 @@ public class ReceiptStorageService {
 
     private Path createTempFile(Path receiptsDir) {
         try {
-            return Files.createTempFile(receiptsDir, "receipt-" + UUID.randomUUID(), ".tmp");
+            Path file = Files.createTempFile(receiptsDir, "receipt-" + UUID.randomUUID(), ".tmp");
+            hardenFile(file);
+            return file;
         } catch (IOException ex) {
             throw new ReceiptIntegrityException("Receipt temp file could not be created");
+        }
+    }
+
+    private void hardenFile(Path file) {
+        ReceiptS3Properties.Download download = properties.getDownload();
+        try {
+            java.util.Set<java.nio.file.attribute.PosixFilePermission> perms =
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rw-------");
+            Files.setPosixFilePermissions(file, perms);
+            return;
+        } catch (UnsupportedOperationException ignored) {
+            // non-POSIX, try ACL below
+        } catch (IOException ex) {
+            if (!download.isAllowUnverifiedTempAcl()) {
+                throw new ReceiptIntegrityException("Receipt temp file permissions could not be hardened");
+            }
+            log.warn("Could not set POSIX permissions for receipt temp file {}", file, ex);
+            return;
+        }
+
+        var view = Files.getFileAttributeView(file, java.nio.file.attribute.AclFileAttributeView.class);
+        if (view == null) {
+            if (!download.isAllowUnverifiedTempAcl()) {
+                throw new ReceiptIntegrityException("Receipt temp file permissions could not be verified");
+            }
+            return;
+        }
+        try {
+            var owner = view.getOwner();
+            var lookup = file.getFileSystem().getUserPrincipalLookupService();
+            var admins = lookup.lookupPrincipalByGroupName("Administrators");
+            java.nio.file.attribute.GroupPrincipal system;
+            try {
+                system = lookup.lookupPrincipalByGroupName("SYSTEM");
+            } catch (IOException ex) {
+                system = lookup.lookupPrincipalByGroupName("SISTEMA");
+            }
+            var full = java.util.EnumSet.allOf(java.nio.file.attribute.AclEntryPermission.class);
+            view.setAcl(java.util.List.of(
+                    java.nio.file.attribute.AclEntry.newBuilder()
+                            .setType(java.nio.file.attribute.AclEntryType.ALLOW)
+                            .setPrincipal(owner).setPermissions(full).build(),
+                    java.nio.file.attribute.AclEntry.newBuilder()
+                            .setType(java.nio.file.attribute.AclEntryType.ALLOW)
+                            .setPrincipal(admins).setPermissions(full).build(),
+                    java.nio.file.attribute.AclEntry.newBuilder()
+                            .setType(java.nio.file.attribute.AclEntryType.ALLOW)
+                            .setPrincipal(system).setPermissions(full).build()
+            ));
+        } catch (IOException | UnsupportedOperationException ex) {
+            if (!download.isAllowUnverifiedTempAcl()) {
+                throw new ReceiptIntegrityException("Receipt temp file permissions could not be hardened");
+            }
+            log.warn("Could not set ACL for receipt temp file {}", file, ex);
         }
     }
 }

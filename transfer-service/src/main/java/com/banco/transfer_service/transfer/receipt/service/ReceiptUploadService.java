@@ -32,6 +32,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.UUID;
+import java.util.concurrent.ScheduledFuture;
 
 @Service
 @RequiredArgsConstructor
@@ -45,6 +46,7 @@ public class ReceiptUploadService {
     private final ReceiptFileValidator fileValidator;
     private final ReceiptS3Properties properties;
     private final S3Client s3Client;
+    private final ReceiptLeaseHeartbeat leaseHeartbeat;
 
     @Transactional
     public ReceiptResponse upload(UUID transferId, MultipartFile file, CustomerContext customer) {
@@ -73,7 +75,13 @@ public class ReceiptUploadService {
         );
         receiptRepository.saveAndFlush(receipt);
 
-        UploadResult result = putObject(receipt, file, validated);
+        ScheduledFuture<?> heartbeat = leaseHeartbeat.start(receiptId, leaseOwner);
+        UploadResult result;
+        try {
+            result = putObject(receipt, file, validated);
+        } finally {
+            leaseHeartbeat.stop(heartbeat);
+        }
 
         if (result instanceof UploadResult.Success success) {
             receipt.markActive(success.versionId(), Instant.now());
@@ -97,8 +105,12 @@ public class ReceiptUploadService {
         UploadResult.Ambiguous ambiguous = (UploadResult.Ambiguous) result;
         log.warn("Ambiguous receipt upload result receiptId={} transferId={}: {}",
                 receipt.getId(), transfer.id(), ambiguous.message());
-        receipt.releaseAmbiguousLease(Instant.now().plus(properties.getUpload().getRetryBackoff()));
-        receiptRepository.saveAndFlush(receipt);
+        int released = receiptRepository.releaseAmbiguousLease(
+                receipt.getId(), leaseOwner, properties.getUpload().getRetryBackoff().toSeconds());
+        if (released == 0) {
+            receipt.releaseAmbiguousLease(Instant.now().plus(properties.getUpload().getRetryBackoff()));
+            receiptRepository.saveAndFlush(receipt);
+        }
         TransferReceipt refreshed = receiptRepository.findById(receipt.getId()).orElse(receipt);
         ReceiptResponse response = toResponse(refreshed);
         if (refreshed.getStatus() == ReceiptStatus.ACTIVE) {
