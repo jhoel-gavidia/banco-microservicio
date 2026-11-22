@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import software.amazon.awssdk.awscore.AwsRequestOverrideConfiguration;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.ChecksumMode;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
@@ -86,6 +87,7 @@ public class ReceiptStorageService {
         GetObjectRequest request = GetObjectRequest.builder()
                 .bucket(receipt.getStorageBucket())
                 .key(receipt.getObjectKey())
+                .checksumMode(ChecksumMode.ENABLED)
                 .overrideConfiguration(AwsRequestOverrideConfiguration.builder()
                         .apiCallTimeout(apiCallTimeout)
                         .apiCallAttemptTimeout(apiCallTimeout)

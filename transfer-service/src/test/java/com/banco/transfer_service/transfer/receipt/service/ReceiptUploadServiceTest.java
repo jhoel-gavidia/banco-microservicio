@@ -20,6 +20,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
 import software.amazon.awssdk.core.exception.ApiCallTimeoutException;
@@ -31,6 +32,7 @@ import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -67,7 +69,18 @@ class ReceiptUploadServiceTest {
         properties.getS3().setRegion("us-east-1");
         properties.getUpload().setLeaseDuration(java.time.Duration.ofMinutes(2));
         properties.getUpload().setRetryBackoff(java.time.Duration.ofSeconds(5));
-        service = new ReceiptUploadService(transferService, receiptRepository, fileValidator, properties, s3Client, leaseHeartbeat);
+        TransactionTemplate tx = new TransactionTemplate();
+        tx.setTransactionManager(new org.springframework.transaction.support.AbstractPlatformTransactionManager() {
+            @Override
+            protected Object doGetTransaction() { return new Object(); }
+            @Override
+            protected void doBegin(Object transaction, org.springframework.transaction.TransactionDefinition definition) { }
+            @Override
+            protected void doCommit(org.springframework.transaction.support.DefaultTransactionStatus status) { }
+            @Override
+            protected void doRollback(org.springframework.transaction.support.DefaultTransactionStatus status) { }
+        });
+        service = new ReceiptUploadService(transferService, receiptRepository, fileValidator, properties, s3Client, leaseHeartbeat, tx);
         when(leaseHeartbeat.start(any(UUID.class), any(UUID.class))).thenReturn(null);
     }
 
@@ -78,19 +91,23 @@ class ReceiptUploadServiceTest {
         when(receiptRepository.saveAndFlush(any(TransferReceipt.class))).thenAnswer(inv -> inv.getArgument(0));
         when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
                 .thenReturn(PutObjectResponse.builder().versionId("v1").checksumSHA256(base64()).build());
+        when(receiptRepository.markActive(any(UUID.class), any(UUID.class), any())).thenReturn(1);
+        when(receiptRepository.findById(any(UUID.class))).thenAnswer(inv -> {
+            ArgumentCaptor<TransferReceipt> captor = ArgumentCaptor.forClass(TransferReceipt.class);
+            verify(receiptRepository, org.mockito.Mockito.atLeastOnce()).saveAndFlush(captor.capture());
+            TransferReceipt saved = captor.getAllValues().get(captor.getAllValues().size() - 1);
+            saved.markActive("v1", Instant.now());
+            return Optional.of(saved);
+        });
 
         ReceiptResponse response = service.upload(TRANSFER_ID, file(), new CustomerContext(CUSTOMER_ID, false));
 
         assertThat(response.status()).isEqualTo(ReceiptStatus.ACTIVE);
-        ArgumentCaptor<TransferReceipt> captor = ArgumentCaptor.forClass(TransferReceipt.class);
-        verify(receiptRepository, org.mockito.Mockito.atLeastOnce()).saveAndFlush(captor.capture());
-        TransferReceipt saved = captor.getAllValues().get(captor.getAllValues().size() - 1);
-        assertThat(saved.getStatus()).isEqualTo(ReceiptStatus.ACTIVE);
-        assertThat(saved.getFailureReason()).isNull();
+        verify(receiptRepository).markActive(any(UUID.class), any(UUID.class), any());
     }
 
     @Test
-    void upload_onChecksumMismatch_marksFailedAndThrows409() {
+    void upload_onChecksumMismatchWithoutVerification_releasesLeaseAndThrows202() {
         mockTransfer();
         mockValidatedFile();
         when(receiptRepository.saveAndFlush(any(TransferReceipt.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -101,6 +118,47 @@ class ReceiptUploadServiceTest {
                                 .errorMessage("checksum mismatch")
                                 .build())
                         .build());
+        when(s3Client.headObject(any(software.amazon.awssdk.services.s3.model.HeadObjectRequest.class)))
+                .thenReturn(software.amazon.awssdk.services.s3.model.HeadObjectResponse.builder().build());
+        when(receiptRepository.releaseAmbiguousLease(any(UUID.class), any(UUID.class), any(Long.class))).thenReturn(1);
+        when(receiptRepository.findById(any(UUID.class))).thenAnswer(inv -> {
+            ArgumentCaptor<TransferReceipt> captor = ArgumentCaptor.forClass(TransferReceipt.class);
+            verify(receiptRepository, org.mockito.Mockito.atLeastOnce()).saveAndFlush(captor.capture());
+            TransferReceipt last = captor.getAllValues().get(captor.getAllValues().size() - 1);
+            last.releaseAmbiguousLease(Instant.now().plusSeconds(5));
+            return Optional.of(last);
+        });
+
+        assertThatThrownBy(() -> service.upload(TRANSFER_ID, file(), new CustomerContext(CUSTOMER_ID, false)))
+                .isInstanceOf(ReceiptUploadPendingException.class)
+                .satisfies(ex -> assertThat(((ReceiptUploadPendingException) ex).getReceipt().status())
+                        .isEqualTo(ReceiptStatus.PENDING));
+    }
+
+    @Test
+    void upload_onChecksumMismatchWithDifferentHeadChecksum_marksFailedAndThrows409() {
+        mockTransfer();
+        mockValidatedFile();
+        when(receiptRepository.saveAndFlush(any(TransferReceipt.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                .thenThrow(S3Exception.builder().statusCode(400)
+                        .awsErrorDetails(AwsErrorDetails.builder()
+                                .errorCode("BadDigest")
+                                .errorMessage("checksum mismatch")
+                                .build())
+                        .build());
+        when(s3Client.headObject(any(software.amazon.awssdk.services.s3.model.HeadObjectRequest.class)))
+                .thenReturn(software.amazon.awssdk.services.s3.model.HeadObjectResponse.builder()
+                        .checksumSHA256(Base64.getEncoder().encodeToString(new byte[32]))
+                        .build());
+        when(receiptRepository.markFailed(any(UUID.class), any(UUID.class), any(), any())).thenReturn(1);
+        when(receiptRepository.findById(any(UUID.class))).thenAnswer(inv -> {
+            ArgumentCaptor<TransferReceipt> c = ArgumentCaptor.forClass(TransferReceipt.class);
+            verify(receiptRepository, org.mockito.Mockito.atLeastOnce()).saveAndFlush(c.capture());
+            TransferReceipt saved = c.getAllValues().get(c.getAllValues().size() - 1);
+            saved.markFailed(ReceiptFailureReason.CHECKSUM_MISMATCH, "checksum mismatch");
+            return Optional.of(saved);
+        });
 
         assertThatThrownBy(() -> service.upload(TRANSFER_ID, file(), new CustomerContext(CUSTOMER_ID, false)))
                 .isInstanceOf(ReceiptFailedException.class)
@@ -109,12 +167,44 @@ class ReceiptUploadServiceTest {
     }
 
     @Test
-    void upload_onDefinitiveFailure_schedulesRetryAndThrows503() {
+    void upload_onS3ServerError_releasesLeaseAndThrows202() {
         mockTransfer();
         mockValidatedFile();
         when(receiptRepository.saveAndFlush(any(TransferReceipt.class))).thenAnswer(inv -> inv.getArgument(0));
         when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
                 .thenThrow(S3Exception.builder().statusCode(500).message("boom").build());
+        when(receiptRepository.releaseAmbiguousLease(any(UUID.class), any(UUID.class), any(Long.class))).thenReturn(1);
+        when(receiptRepository.findById(any(UUID.class))).thenAnswer(inv -> {
+            ArgumentCaptor<TransferReceipt> c = ArgumentCaptor.forClass(TransferReceipt.class);
+            verify(receiptRepository, org.mockito.Mockito.atLeastOnce()).saveAndFlush(c.capture());
+            TransferReceipt saved = c.getAllValues().get(c.getAllValues().size() - 1);
+            saved.releaseAmbiguousLease(Instant.now().plusSeconds(5));
+            return Optional.of(saved);
+        });
+
+        assertThatThrownBy(() -> service.upload(TRANSFER_ID, file(), new CustomerContext(CUSTOMER_ID, false)))
+                .isInstanceOf(ReceiptUploadPendingException.class)
+                .satisfies(ex -> assertThat(((ReceiptUploadPendingException) ex).getReceipt().status())
+                        .isEqualTo(ReceiptStatus.PENDING));
+    }
+
+    @Test
+    void upload_onDefinitive4xx_schedulesRetryAndThrows503() {
+        mockTransfer();
+        mockValidatedFile();
+        when(receiptRepository.saveAndFlush(any(TransferReceipt.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                .thenThrow(S3Exception.builder().statusCode(403)
+                        .awsErrorDetails(AwsErrorDetails.builder().errorCode("AccessDenied").errorMessage("denied").build())
+                        .build());
+        when(receiptRepository.reschedule(any(UUID.class), any(UUID.class), any(Long.class), any())).thenReturn(1);
+        when(receiptRepository.findById(any(UUID.class))).thenAnswer(inv -> {
+            ArgumentCaptor<TransferReceipt> c = ArgumentCaptor.forClass(TransferReceipt.class);
+            verify(receiptRepository, org.mockito.Mockito.atLeastOnce()).saveAndFlush(c.capture());
+            TransferReceipt saved = c.getAllValues().get(c.getAllValues().size() - 1);
+            saved.scheduleRetry(Instant.now().plusSeconds(5), "denied");
+            return Optional.of(saved);
+        });
 
         assertThatThrownBy(() -> service.upload(TRANSFER_ID, file(), new CustomerContext(CUSTOMER_ID, false)))
                 .isInstanceOf(ReceiptStorageUnavailableException.class);
@@ -127,10 +217,12 @@ class ReceiptUploadServiceTest {
         when(receiptRepository.saveAndFlush(any(TransferReceipt.class))).thenAnswer(inv -> inv.getArgument(0));
         when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
                 .thenThrow(ApiCallTimeoutException.create(1000));
+        when(receiptRepository.releaseAmbiguousLease(any(UUID.class), any(UUID.class), any(Long.class))).thenReturn(1);
         when(receiptRepository.findById(any(UUID.class))).thenAnswer(inv -> {
             ArgumentCaptor<TransferReceipt> captor = ArgumentCaptor.forClass(TransferReceipt.class);
             verify(receiptRepository, org.mockito.Mockito.atLeastOnce()).saveAndFlush(captor.capture());
             TransferReceipt last = captor.getAllValues().get(captor.getAllValues().size() - 1);
+            last.releaseAmbiguousLease(Instant.now().plusSeconds(5));
             return Optional.of(last);
         });
 

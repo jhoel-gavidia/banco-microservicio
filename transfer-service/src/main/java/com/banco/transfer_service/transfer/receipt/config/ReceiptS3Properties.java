@@ -42,6 +42,8 @@ public class ReceiptS3Properties {
         require(hasText(s3.region), "s3.region is required");
         require(positive(s3.apiCallTimeout), "s3.api-call-timeout must be positive");
         require(positive(s3.apiCallAttemptTimeout), "s3.api-call-attempt-timeout must be positive");
+        require(!s3.apiCallAttemptTimeout.minus(s3.apiCallTimeout).isPositive(),
+                "s3.api-call-attempt-timeout cannot exceed s3.api-call-timeout");
         require(hasText(s3.checksumMode), "s3.checksum-mode is required");
         require("ENABLED".equalsIgnoreCase(s3.checksumMode.trim()),
                 "s3.checksum-mode must be ENABLED");
@@ -66,13 +68,20 @@ public class ReceiptS3Properties {
         require(positive(upload.maxFileSize), "upload.max-file-size must be positive");
         require(upload.maxFileSize.toBytes() <= MAX_UPLOAD_SIZE.toBytes(),
                 "upload.max-file-size cannot exceed 5MB");
-        require(upload.maxAttempts >= 1, "upload.max-attempts must be at least 1");
+        require(upload.maxAttempts >= 1 && upload.maxAttempts <= 3,
+                "upload.max-attempts must be between 1 and 3");
         require(positive(upload.leaseDuration), "upload.lease-duration must be positive");
         require(positive(upload.heartbeatInterval), "upload.heartbeat-interval must be positive");
         require(upload.heartbeatInterval.compareTo(upload.leaseDuration) < 0,
                 "upload.heartbeat-interval must be shorter than upload.lease-duration");
+        require(upload.heartbeatInterval.multipliedBy(2).compareTo(upload.leaseDuration) <= 0,
+                "upload.heartbeat-interval must be at most half of upload.lease-duration");
         require(positive(upload.retryBackoff), "upload.retry-backoff must be positive");
         require(positive(upload.missingGrace), "upload.missing-grace must be positive");
+        require(upload.missingGrace.compareTo(upload.leaseDuration) >= 0,
+                "upload.missing-grace must be at least upload.lease-duration");
+        requireSecondsPrecision(upload.leaseDuration, "upload.lease-duration");
+        requireSecondsPrecision(upload.retryBackoff, "upload.retry-backoff");
     }
 
     private void validateDownload() {
@@ -98,6 +107,8 @@ public class ReceiptS3Properties {
         require(reconcile != null, "reconcile configuration is required");
         require(positive(reconcile.interval), "reconcile.interval must be positive");
         require(reconcile.batchSize >= 1, "reconcile.batch-size must be at least 1");
+        require(reconcile.interval.compareTo(upload.leaseDuration) <= 0,
+                "reconcile.interval should not exceed upload.lease-duration to recover stale pending receipts promptly");
     }
 
     private static void require(boolean condition, String message) {
@@ -120,6 +131,11 @@ public class ReceiptS3Properties {
 
     private static boolean positive(DataSize size) {
         return size != null && size.toBytes() > 0;
+    }
+
+    private static void requireSecondsPrecision(Duration duration, String field) {
+        require(duration != null && duration.toMillis() % 1000 == 0,
+                field + " must use whole-second precision because SQL lease/backoff calculations use seconds");
     }
 
     @Getter

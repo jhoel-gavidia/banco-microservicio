@@ -26,6 +26,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @ExtendWith(MockitoExtension.class)
 class ReceiptReconcilerTest {
@@ -44,7 +45,14 @@ class ReceiptReconcilerTest {
         properties.getUpload().setMaxAttempts(3);
         properties.getUpload().setRetryBackoff(Duration.ofSeconds(5));
         properties.getUpload().setMissingGrace(Duration.ofMinutes(2));
-        reconciler = new ReceiptReconciler(repository, properties, s3Client);
+        TransactionTemplate tx = new TransactionTemplate();
+        tx.setTransactionManager(new org.springframework.transaction.support.AbstractPlatformTransactionManager() {
+            @Override protected Object doGetTransaction() { return new Object(); }
+            @Override protected void doBegin(Object transaction, org.springframework.transaction.TransactionDefinition definition) { }
+            @Override protected void doCommit(org.springframework.transaction.support.DefaultTransactionStatus status) { }
+            @Override protected void doRollback(org.springframework.transaction.support.DefaultTransactionStatus status) { }
+        });
+        reconciler = new ReceiptReconciler(repository, properties, s3Client, tx);
     }
 
     @Test
@@ -113,8 +121,9 @@ class ReceiptReconcilerTest {
     }
 
     @Test
-    void processClaimed_whenMaxAttemptsReached_marksUnexpectedError() {
+    void processClaimed_whenMaxAttemptsReachedAndObjectMissing_marksUnexpectedError() {
         TransferReceipt receipt = pending(3, Instant.now());
+        when(s3Client.headObject(any(HeadObjectRequest.class))).thenThrow(NoSuchKeyException.builder().build());
         when(repository.markFailed(eq(receipt.getId()), eq(worker()),
                 eq(ReceiptFailureReason.UNEXPECTED_ERROR.name()), any())).thenReturn(1);
 
@@ -122,6 +131,31 @@ class ReceiptReconcilerTest {
 
         verify(repository).markFailed(eq(receipt.getId()), eq(worker()),
                 eq(ReceiptFailureReason.UNEXPECTED_ERROR.name()), any());
+    }
+
+    @Test
+    void processClaimed_whenMaxAttemptsReachedButObjectValid_marksActive() {
+        TransferReceipt receipt = pending(3, Instant.now());
+        when(s3Client.headObject(any(HeadObjectRequest.class))).thenReturn(HeadObjectResponse.builder()
+                .checksumSHA256(base64(receipt.getSha256Hex()))
+                .versionId("v2")
+                .build());
+        when(repository.markActive(receipt.getId(), worker(), "v2")).thenReturn(1);
+
+        reconciler.processClaimed(receipt, worker());
+
+        verify(repository).markActive(receipt.getId(), worker(), "v2");
+    }
+
+    @Test
+    void processClaimed_whenChecksumUnavailable_reschedules() {
+        TransferReceipt receipt = pending(1, Instant.now());
+        when(s3Client.headObject(any(HeadObjectRequest.class))).thenReturn(HeadObjectResponse.builder().build());
+        when(repository.reschedule(eq(receipt.getId()), eq(worker()), eq(5L), any())).thenReturn(1);
+
+        reconciler.processClaimed(receipt, worker());
+
+        verify(repository).reschedule(eq(receipt.getId()), eq(worker()), eq(5L), any());
     }
 
     private static TransferReceipt pending(int attempts, Instant createdAt) {
